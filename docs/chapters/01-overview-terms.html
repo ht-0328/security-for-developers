@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>セキュリティの全体像と用語 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .cvss { display: grid; gap: 10px; grid-template-columns: 1fr auto; align-items: center; }
+  .cvss input[type=range] { width: 100%; accent-color: var(--accent); }
+  .cvss .score { font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 3.2ch; text-align: right; }
+  .cvss .band { grid-column: 1 / -1; border-radius: 10px; padding: 10px 14px; font-weight: 700; }
+  .cvss .band small { display: block; font-weight: 400; color: inherit; opacity: .85; }
+  .scale { display: flex; margin-top: 6px; font-size: .72rem; color: var(--ink-3); }
+  .scale span { flex: 1; text-align: center; border-top: 4px solid; padding-top: 2px; }
+</style>
+</head>
+<body data-root="../" data-page="ch01">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第1章</div>
+<p><span class="badge basic">基礎</span></p>
+<h1>第1章 セキュリティの全体像と用語</h1>
+<p class="lead">「脆弱性」「サイバー攻撃」のニュースを、自分のシステムに関係があるかどうか判断できるようになるための、最小限の地図です。守るものは3つ、言葉の関係は1枚の図、攻撃の入口は4つ、ニュースの用語は10個ほど。これだけで、この先の章と日々のニュースが読めるようになります。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>守るものは3つ</b>：機密性（漏れない）・完全性（書き換えられない）・可用性（止まらない）
+      <ul>
+        <li>情報漏えい＝機密性が壊れた。改ざん・なりすまし送金＝完全性が壊れた。ランサムウェアで業務停止・DDoS＝可用性が壊れた</li>
+        <li>事故はこの3つのどれか（または複数）が壊れること。対策もこの3つのどれを守るかで整理できる</li>
+      </ul>
+    </li>
+    <li><b>言葉の関係は1枚の図</b>：脆弱性（穴）に脅威（狙う人・事象）が当たると攻撃が成立し、インシデント（事故）になる
+      <ul>
+        <li>リスク＝「起きやすさ × 被害の大きさ」。穴があっても、外から届かず被害も小さければリスクは低い</li>
+        <li>対策は3種類：予防（穴をふさぐ）・検知（気づく）・回復（被害を小さく、元に戻す）</li>
+        <li>「脆弱性がある」はすぐ事故ではない。「脆弱性がない」とも誰も言えない。だから予防・検知・回復をそろえる</li>
+      </ul>
+    </li>
+    <li><b>攻撃の入口は4つ</b>：入力（コード）・部品（ライブラリ）・設定（公開範囲・権限）・人（フィッシング・パスワード）
+      <ul>
+        <li>入力：利用者が送る文字列を命令として実行してしまう（第3章）、ログインや権限の穴（第4章）</li>
+        <li>部品：使っているライブラリ・フレームワーク・OS の穴。ニュースの大半はこれ（第6章）</li>
+        <li>設定：DB をインターネットに公開、ストレージを全員に公開、初期パスワードのまま（第7章）</li>
+        <li>人：偽メールでパスワードを入力させる、同じパスワードの使い回し。開発者は多要素認証と最小権限で被害を広げない作りにする（第4章・第8章）</li>
+      </ul>
+    </li>
+    <li><b>認証と認可は別物</b>：認証＝あなたは誰か（ログイン）、認可＝あなたは何をしてよいか（権限）
+      <ul>
+        <li>「ログインしていれば OK」は認証だけ。他人の注文番号を URL に入れて見えてしまう事故は認可の不備</li>
+      </ul>
+    </li>
+    <li><b>ニュースの読み方</b>：CVE・CVSS・ゼロデイ・PoC・パッチ・EoL の6語で大半が読める
+      <ul>
+        <li>CVE：脆弱性に付く世界共通の番号（CVE-西暦-連番）</li>
+        <li>CVSS：深刻度の点数（0〜10）。7.0 以上は「重要」、9.0 以上は「緊急」で今日中に判断する</li>
+        <li>ゼロデイ：修正が出る前に悪用されている。PoC：攻撃できることを示すコードが公開されている（悪用が急増する合図）</li>
+        <li>パッチ：修正版。EoL：サポート終了＝今後パッチが出ない</li>
+        <li>自分への影響は3問で判断：その部品を使っているか／外から届く経路があるか／直した版に上げたか</li>
+      </ul>
+    </li>
+    <li><b>今、何が多いか</b>：IPA「情報セキュリティ10大脅威 2026」（組織）は 1位 ランサム攻撃、2位 サプライチェーンや委託先を狙った攻撃、3位 AI の利用をめぐるサイバーリスク、4位 システムの脆弱性を悪用した攻撃
+      <ul>
+        <li>開発者に直結するのは 2位（部品・委託先）と 4位（自分のシステムの穴）</li>
+        <li>Web アプリの穴の分類は OWASP Top 10:2025。1位 アクセス制御の不備、2位 セキュリティ設定の不備、3位 ソフトウェアサプライチェーンの不備、5位 インジェクション</li>
+      </ul>
+    </li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>守るもの：機密性・完全性・可用性</li>
+    <li>言葉の関係：脆弱性・脅威・リスク・攻撃・インシデント・対策</li>
+    <li>攻撃はどこから入るか：4つの入口</li>
+    <li>認証・認可・セッション（さわりだけ）</li>
+    <li>ニュースを読むための用語：CVE・CVSS・ゼロデイ・PoC・パッチ・EoL</li>
+    <li>今、何が多いか：IPA 10大脅威 2026 と OWASP Top 10:2025</li>
+    <li>役割分担：開発者は何を受け持つか</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>ランサムウェアで社内の業務が止まったとき、壊れたのは機密性・完全性・可用性のどれか。</li>
+    <li>「ログインしている利用者なら誰でも、URL の注文番号を変えて他人の注文が見える」。これは認証と認可のどちらの問題か。</li>
+    <li>「〇〇に CVSS 9.8 の脆弱性。PoC 公開済み」というニュースを見た。最初に確かめる3つのことは何か。</li>
+  </ul>
+</div>
+
+<h2 id="cia">1. 守るもの：機密性・完全性・可用性</h2>
+<p>セキュリティで守るものは、昔から3つに整理されています。<span class="term" data-tip="機密性（Confidentiality）：許可された人だけが情報を見られること。">機密性</span>・<span class="term" data-tip="完全性（Integrity）：情報が勝手に書き換えられず、正しいままであること。">完全性</span>・<span class="term" data-tip="可用性（Availability）：使いたいときにシステムが使えること。">可用性</span>です。英語の頭文字をとって <b>CIA</b> と呼びます。事故のニュースは、必ずこの3つのどれかが壊れた話です。</p>
+<div class="table-wrap"><table>
+  <tr><th>守るもの</th><th>一言でいうと</th><th>壊れると（事故の形）</th><th>主に関係する章</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/defense/eye-off.svg" alt=""><b>機密性</b></td><td><b>漏れない</b></td><td>個人情報の漏えい、ソースコードや API キーの流出、他人のデータが見える</td><td>第3・4・5・7章</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/defense/file-check-2.svg" alt=""><b>完全性</b></td><td><b>書き換えられない</b></td><td>Web サイトの改ざん、注文金額の書き換え、なりすましによる送金、ライブラリへの不正コード混入</td><td>第3・4・6章</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/activity.svg" alt=""><b>可用性</b></td><td><b>止まらない</b></td><td>ランサムウェアで業務停止、DDoS でサイトに繋がらない、バックアップがなく復旧できない</td><td>第7・8章</td></tr>
+</table></div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>自宅に置き換えると、<b>機密性</b>は「引き出しの中身を他人に見られない」、<b>完全性</b>は「留守中に勝手に模様替えされたり、書類を差し替えられたりしない」、<b>可用性</b>は「停電や鍵の紛失で家に入れない、ということがない」です。泥棒対策（機密性）だけがセキュリティではありません。</p>
+</div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「漏れない・変わらない・止まらない」</div>
+  <p>事故のニュースを見たら、「どれが壊れたか」を一言で言ってみてください。情報漏えいは「漏れた」、改ざん・不正送金は「変わった」、ランサムウェア・DDoS は「止まった」。対策を考えるときも、この3つのどれを守る話かを先に決めると整理しやすくなります。</p>
+</div>
+
+<h2 id="terms">2. 言葉の関係：脆弱性・脅威・リスク・攻撃・インシデント・対策</h2>
+<p>ニュースや会議では、似た言葉がまとめて出てきます。関係を1枚の図にしておくと、どの言葉が出ても位置づけがわかります。</p>
+<div class="diagram">
+  <div class="dtitle">脆弱性に脅威が当たると攻撃が成立し、インシデントになる</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/threat/lock-open.svg" alt="">脆弱性<small>穴（欠陥・設定ミス）</small></div>
+    <div class="arr">＋</div>
+    <div class="node"><img src="../assets/icons/threat/skull.svg" alt="">脅威<small>狙う人・事象</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/threat/swords.svg" alt="">攻撃<small>穴を突く行為</small></div>
+    <div class="arr ng">→</div>
+    <div class="node"><img src="../assets/icons/threat/triangle-alert.svg" alt="">インシデント<small>事故（漏えい・改ざん・停止）</small></div>
+  </div>
+  <div class="flow" style="margin-top:14px"><div class="arr ok">↑<small>対策が止める</small></div></div>
+  <div class="flow wrap-ok">
+    <div class="node"><img src="../assets/icons/defense/shield.svg" alt="">予防<small>穴をふさぐ・狙われにくくする</small></div>
+    <div class="node"><img src="../assets/icons/defense/radar.svg" alt="">検知<small>起きたことに気づく</small></div>
+    <div class="node"><img src="../assets/icons/ops/archive-restore.svg" alt="">回復<small>被害を小さく、元に戻す</small></div>
+  </div>
+  <div class="cap"><b>リスク</b>＝この流れが「起きやすいか」×「起きたら被害が大きいか」。穴があっても、外から届かず被害も小さければリスクは低く、逆に小さな穴でも個人情報の DB に直結していればリスクは高い。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>言葉</th><th>意味</th><th>例</th></tr>
+  <tr><td><b>脆弱性</b><br><small class="muted">ぜいじゃくせい／vulnerability</small></td><td>攻撃に悪用されうる欠陥や設定ミス。「穴」</td><td>SQL を文字列でつないでいる、DB がインターネットから見える、古いライブラリを使っている</td></tr>
+  <tr><td><b>脅威</b><br><small class="muted">threat</small></td><td>穴を突く可能性のある人や事象</td><td>金銭目的の攻撃グループ、不満を持つ内部の人、自動で穴を探し回るボット</td></tr>
+  <tr><td><b>攻撃</b><br><small class="muted">attack</small></td><td>脅威が脆弱性を実際に突く行為</td><td>SQL インジェクション、パスワードの総当たり、フィッシングメール</td></tr>
+  <tr><td><b>インシデント</b><br><small class="muted">incident</small></td><td>セキュリティ上の事故。機密性・完全性・可用性のどれかが壊れた（または壊れかけた）出来事</td><td>個人情報の漏えい、サイト改ざん、ランサムウェアによる停止</td></tr>
+  <tr><td><b>リスク</b><br><small class="muted">risk</small></td><td>インシデントの「起きやすさ × 被害の大きさ」</td><td>外から届く穴 × 個人情報 DB ＝ 高。社内だけ × 公開情報 ＝ 低</td></tr>
+  <tr><td><b>対策</b><br><small class="muted">countermeasure</small></td><td>予防・検知・回復のいずれかでリスクを下げる手段</td><td>プレースホルダ（予防）、ログイン失敗のアラート（検知）、バックアップ（回復）</td></tr>
+</table></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「脆弱性がある」＝「すぐ事故」ではありません。脅威が届く経路と被害の大きさで緊急度が決まります（5節の3問）。</li>
+    <li>逆に「脆弱性はない」とは誰にも言えません。だから<b>予防だけでなく検知と回復をそろえる</b>のが基本です（第8章）。</li>
+    <li>「ウイルス対策ソフトを入れたから安全」は、入口4つのうち「人」の一部しか守っていません。</li>
+  </ul>
+</div>
+
+<h2 id="entry">3. 攻撃はどこから入るか：4つの入口</h2>
+<p>攻撃の手口は無数にありますが、<b>入口</b>で分けると4つに整理できます。開発者が直接ふさげるのは最初の3つです。</p>
+<div class="diagram">
+  <div class="dtitle">4つの入口と、ふさぎ方を説明する章</div>
+  <div class="grp-row">
+    <div class="grp internet">
+      <div class="glabel"><img src="../assets/icons/threat/skull.svg" alt=""><span class="gtxt">攻撃者（インターネット）</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/threat/bug.svg" alt="">自動で穴を探すボット</div>
+        <div class="node sm"><img src="../assets/icons/threat/hand-coins.svg" alt="">金銭目的の攻撃者</div>
+        <div class="node sm"><img src="../assets/icons/threat/fish.svg" alt="">偽メール</div>
+      </div>
+    </div>
+  </div>
+  <div class="flow"><div class="arr ng">↓</div></div>
+  <div class="flow wrap-ok">
+    <div class="node"><img src="../assets/icons/asset/text-cursor-input.svg" alt="">① 入力<small>第3・4章</small></div>
+    <div class="node"><img src="../assets/icons/asset/package.svg" alt="">② 部品<small>第6章</small></div>
+    <div class="node"><img src="../assets/icons/asset/server.svg" alt="">③ 設定<small>第7章</small></div>
+    <div class="node"><img src="../assets/icons/people/user.svg" alt="">④ 人<small>第4・8章で被害を限定</small></div>
+  </div>
+  <div class="flow"><div class="arr ng">↓</div></div>
+  <div class="grp-row">
+    <div class="grp trusted">
+      <div class="glabel"><img src="../assets/icons/defense/shield.svg" alt=""><span class="gtxt">守りたいもの</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/database.svg" alt="">データ</div>
+        <div class="node sm"><img src="../assets/icons/defense/key.svg" alt="">認証情報・鍵</div>
+        <div class="node sm"><img src="../assets/icons/ops/activity.svg" alt="">サービスの稼働</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>入口</th><th>何が起きるか</th><th>典型例</th><th>ふさぐ章</th></tr>
+  <tr><td><b>① 入力</b></td><td>利用者が送った文字列を、命令として実行してしまう。ログインや権限の確認に抜けがある</td><td>SQL インジェクション、XSS、他人のデータが見える API、弱いパスワード保存</td><td>第3章・第4章</td></tr>
+  <tr><td><b>② 部品</b></td><td>自分は何も書き換えていないのに、使っているライブラリ・フレームワーク・OS に穴が見つかる</td><td>ログ出力ライブラリの穴で任意コード実行、改ざんされたパッケージの取り込み</td><td>第6章</td></tr>
+  <tr><td><b>③ 設定</b></td><td>公開してはいけないものが公開されている。権限が広すぎる。初期設定のまま</td><td>DB がインターネットから接続できる、ストレージが全員に公開、管理画面が初期パスワード</td><td>第7章</td></tr>
+  <tr><td><b>④ 人</b></td><td>人をだましてパスワードを入力させる、同じパスワードの使い回しを突く、内部の人が持ち出す</td><td>フィッシング、パスワードリスト攻撃、内部不正</td><td>多要素認証（第4章）、最小権限とログ（第8章）で被害を限定</td></tr>
+</table></div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>家にたとえると、<b>① 入力</b>は「窓や郵便受けから入れた物が家の中で勝手に動き出す」、<b>② 部品</b>は「建材そのものに欠陥が見つかる」、<b>③ 設定</b>は「鍵のかけ忘れ・合鍵の置きっぱなし」、<b>④ 人</b>は「訪問販売を装って鍵を開けさせる」です。大工（開発者）が直せるのは最初の3つで、4つ目は「開けてしまっても金庫は別に施錠されている」作りで被害を抑えます。</p>
+</div>
+
+<h2 id="authn-authz">4. 認証・認可・セッション（さわりだけ）</h2>
+<p>第4章で詳しく扱いますが、この3語は会話に頻出するので先に区別しておきます。</p>
+<div class="svc"><img src="../assets/icons/defense/fingerprint.svg" alt=""><div><div class="name">認証<span class="yomi">にんしょう／Authentication、AuthN</span></div><div class="one"><b>あなたは誰か</b>を確かめること。ログイン（ID とパスワード、多要素認証）がこれ。</div></div></div>
+<div class="svc"><img src="../assets/icons/defense/badge-check.svg" alt=""><div><div class="name">認可<span class="yomi">にんか／Authorization、AuthZ</span></div><div class="one"><b>あなたは何をしてよいか</b>を決めること。「この注文はあなたのものか」「管理者だけが削除できる」がこれ。認証が通っても、認可は別に確認が要る。</div></div></div>
+<div class="svc"><img src="../assets/icons/asset/cookie.svg" alt=""><div><div class="name">セッション<span class="yomi">Session</span></div><div class="one">ログイン後、<b>「さっき認証した人だ」と覚えておく仕組み</b>。多くは Cookie に入れた<span class="term" data-tip="セッション ID：ログイン中の利用者を識別するための、推測できないランダムな文字列。">セッション ID</span> で実現する。これが盗まれると、パスワードなしでなりすまされる。</div></div></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <p>「ログインしている利用者だけがアクセスできる画面だから安全」は<b>認証だけ</b>で止まっています。ログイン済みの利用者が URL の ID を書き換えて他人のデータを見る事故は、認可の不備です（OWASP Top 10:2025 の1位「アクセス制御の不備」）。</p>
+</div>
+
+<h2 id="news">5. ニュースを読むための用語</h2>
+<p>脆弱性のニュースは、ほぼ決まった用語で書かれています。次の表の言葉がわかれば、記事の大半は読めます。</p>
+<div class="table-wrap"><table>
+  <tr><th>用語</th><th>意味</th><th>読み取ること</th></tr>
+  <tr><td><b>CVE</b><br><small class="muted">Common Vulnerabilities and Exposures</small></td><td>脆弱性1件ごとに付く世界共通の番号。<code>CVE-西暦-連番</code> の形</td><td>番号で検索すれば、影響範囲・修正版・回避策が公式情報として見つかる</td></tr>
+  <tr><td><b>CVSS</b><br><small class="muted">Common Vulnerability Scoring System</small></td><td>深刻度の点数（0.0〜10.0）。攻撃のしやすさ（ネットワーク越しか、認証が要るか）と影響の大きさで決まる</td><td>7.0 以上は重要、9.0 以上は緊急。ただし自分への影響は別途判断（下の3問）</td></tr>
+  <tr><td><b>NVD／JVN</b></td><td>脆弱性情報のデータベース。NVD は米国、JVN は日本（日本語）</td><td>CVE 番号で引くと詳細がわかる</td></tr>
+  <tr><td><b>ゼロデイ</b><br><small class="muted">0-day</small></td><td>修正版が出る前に悪用されている（または公開された）脆弱性</td><td>パッチがまだない。回避策（機能を止める・外から見えなくする）を探す</td></tr>
+  <tr><td><b>PoC</b><br><small class="muted">Proof of Concept</small></td><td>「この穴は本当に攻撃できる」と示すコードや手順</td><td>PoC が公開されると、自動化された攻撃が数日で急増する。急ぐ合図</td></tr>
+  <tr><td><b>エクスプロイト</b><br><small class="muted">exploit</small></td><td>脆弱性を突く攻撃コードそのもの。「悪用」という意味でも使う</td><td>「エクスプロイトが出回っている」＝実際に攻撃されている</td></tr>
+  <tr><td><b>パッチ／修正版</b></td><td>脆弱性を直した更新。「x.y.z で修正」と書かれる</td><td>自分の版が修正版より古ければ上げる</td></tr>
+  <tr><td><b>回避策</b><br><small class="muted">ワークアラウンド／mitigation</small></td><td>パッチを当てられないときに、影響を抑える設定変更</td><td>機能を無効化する、該当の経路を外から遮断する、など</td></tr>
+  <tr><td><b>EoL</b><br><small class="muted">End of Life／サポート終了</small></td><td>開発元が更新をやめた状態。今後パッチは出ない</td><td>EoL のものを使い続けること自体が脆弱性</td></tr>
+  <tr><td><b>RCE</b><br><small class="muted">Remote Code Execution／リモートコード実行</small></td><td>外から任意のプログラムを実行できてしまう、最も深刻な種類</td><td>「認証不要で RCE」は最優先</td></tr>
+  <tr><td><b>権限昇格</b><br><small class="muted">privilege escalation</small></td><td>一般利用者が管理者の権限を得てしまう種類</td><td>内部に入られた後の被害を大きくする</td></tr>
+  <tr><td><b>侵害／漏えい</b><br><small class="muted">breach</small></td><td>実際に入られた、持ち出された状態。脆弱性の「可能性」ではなく事故</td><td>自分が利用者側なら、パスワード変更・多要素認証の確認</td></tr>
+</table></div>
+
+<div class="box">
+  <div class="box-title"><span class="em">🎚️</span>体験：CVSS の点数と区分</div>
+  <p class="muted" style="margin-top:0">点数を動かすと、区分と一般的な対応の目安が変わります。区分は CVSS v3.x と v4.0 で共通です。</p>
+  <div class="cvss">
+    <input type="range" id="cvss" min="0" max="10" step="0.1" value="9.8" aria-label="CVSS の点数">
+    <div class="score" id="cvss-score">9.8</div>
+    <div class="band" id="cvss-band"></div>
+  </div>
+  <div class="scale">
+    <span style="border-color:var(--ink-3);flex:.1">0 なし</span>
+    <span style="border-color:var(--green);flex:3.9">0.1〜3.9 低</span>
+    <span style="border-color:var(--orange);flex:3">4.0〜6.9 中</span>
+    <span style="border-color:var(--red);flex:2">7.0〜8.9 高</span>
+    <span style="border-color:var(--purple);flex:1.1">9.0〜 緊急</span>
+  </div>
+</div>
+
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる：1本の記事を分解する</div>
+  <p>よくある記事の形：「<b>〇〇（ライブラリ名）に深刻な脆弱性</b>（CVE-20XX-NNNNN、CVSS 9.8）。<b>認証なしでリモートコード実行</b>が可能。<b>修正版 x.y.z が公開</b>。<b>PoC が公開済み</b>で、悪用も確認されている。」</p>
+  <ul style="margin:0">
+    <li>「〇〇に」→ 自分がその部品を使っているか（<code>package-lock.json</code>・<code>requirements.txt</code>・コンテナのイメージを確認）</li>
+    <li>「認証なしでリモートコード実行」→ 最も深刻な種類。外から届くなら今日中</li>
+    <li>「修正版 x.y.z」→ 自分の版と比べる。古ければ上げる</li>
+    <li>「PoC 公開済み・悪用確認」→ 自動攻撃が来る前提で動く。上げられないなら回避策</li>
+  </ul>
+</div>
+
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：自分への影響は3問で決める</div>
+  <ol style="margin:0">
+    <li><b>使っているか</b>：その部品（そのバージョン）が、自分のシステムに入っているか。</li>
+    <li><b>届くか</b>：攻撃に使う経路（インターネットから到達する URL、ファイルアップロード、特定の機能）が、自分の構成で外から届くか。</li>
+    <li><b>直したか</b>：修正版に上げたか。上げられないなら回避策を入れたか。</li>
+  </ol>
+  <p>「使っている × 届く × 直していない」がそろったときだけ緊急です。どれか1つでも「いいえ」なら、優先度を下げて計画的に直します。</p>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>使っている？</th><th>外から届く？</th><th>対応の目安</th></tr>
+  <tr><td>はい</td><td>はい</td><td><b>今日中</b>に修正版へ。上げられなければ回避策（経路の遮断・機能の無効化）を先に入れる</td></tr>
+  <tr><td>はい</td><td>いいえ（社内のみ・該当機能を使っていない）</td><td>次の定期リリースで上げる。内部に入られた後の被害を大きくするので放置はしない</td></tr>
+  <tr><td>いいえ</td><td>—</td><td>対応不要。ただし「使っていない」の確認は lock ファイルやイメージで裏を取る（間接的に使っていることが多い。第6章）</td></tr>
+</table></div>
+
+<h2 id="landscape">6. 今、何が多いか：IPA 10大脅威 2026 と OWASP Top 10:2025</h2>
+<p>「ニュースが多い」と感じるのは正しい感覚です。何が多いかは、日本では IPA（情報処理推進機構）が毎年1月に発表する「情報セキュリティ10大脅威」で、Web アプリの穴の分類は OWASP Top 10 で把握できます。</p>
+<h3>IPA「情報セキュリティ10大脅威 2026」（組織向け）</h3>
+<div class="table-wrap"><table>
+  <tr><th>順位</th><th>脅威</th><th>開発者との関係</th></tr>
+  <tr><td>1位</td><td>ランサム攻撃による被害</td><td>侵入後に止められない構成、バックアップの不備（第7・8章）</td></tr>
+  <tr><td>2位</td><td>サプライチェーンや委託先を狙った攻撃</td><td><b>直結</b>。使っている部品・委託先の穴（第6章）</td></tr>
+  <tr><td>3位</td><td>AI の利用をめぐるサイバーリスク（初登場）</td><td>AI 生成コードの穴、プロンプトインジェクション（第9章）</td></tr>
+  <tr><td>4位</td><td>システムの脆弱性を悪用した攻撃</td><td><b>直結</b>。自分のシステムの穴と、パッチの遅れ（第3〜7章）</td></tr>
+  <tr><td>5位</td><td>機密情報を狙った標的型攻撃</td><td>最小権限とログ（第8章）</td></tr>
+  <tr><td>6位</td><td>地政学的リスクに起因するサイバー攻撃（情報戦を含む）</td><td>—</td></tr>
+  <tr><td>7位</td><td>内部不正による情報漏えい等</td><td>権限の棚卸し、操作ログ（第8章）</td></tr>
+  <tr><td>8位</td><td>リモートワーク等の環境や仕組みを狙った攻撃</td><td>VPN・リモート接続機器のパッチ（第7章）</td></tr>
+  <tr><td>9位</td><td>DDoS 攻撃（分散型サービス妨害攻撃）</td><td>WAF・CDN・レート制限（第7章）</td></tr>
+  <tr><td>10位</td><td>ビジネスメール詐欺</td><td>—（人・業務プロセスの課題）</td></tr>
+</table></div>
+<h3>OWASP Top 10:2025（Web アプリケーションの穴の分類）</h3>
+<div class="table-wrap"><table>
+  <tr><th>番号</th><th>分類</th><th>一言でいうと</th><th>本サイトの章</th></tr>
+  <tr><td>A01</td><td>アクセス制御の不備</td><td>他人のデータが見える・操作できる（認可の不備）</td><td>第4章</td></tr>
+  <tr><td>A02</td><td>セキュリティ設定の不備</td><td>公開範囲・初期設定・不要な機能の放置</td><td>第7章</td></tr>
+  <tr><td>A03</td><td>ソフトウェアサプライチェーンの不備</td><td>部品の穴、改ざんされた部品の取り込み</td><td>第6章</td></tr>
+  <tr><td>A04</td><td>暗号化の不備</td><td>平文保存、弱いハッシュ、HTTPS なし</td><td>第5章</td></tr>
+  <tr><td>A05</td><td>インジェクション</td><td>入力を命令として実行してしまう（SQL・OS コマンド・XSS）</td><td>第3章</td></tr>
+  <tr><td>A06</td><td>安全性を欠いた設計</td><td>設計段階で脅威を考えていない</td><td>第9章</td></tr>
+  <tr><td>A07</td><td>認証の不備</td><td>弱いパスワード保存、総当たりを防げない、セッションの不備</td><td>第4章</td></tr>
+  <tr><td>A08</td><td>ソフトウェアまたはデータの完全性の不備</td><td>検証なしの自動更新・デシリアライズ、CI の改ざん</td><td>第6章・第7章</td></tr>
+  <tr><td>A09</td><td>セキュリティログとアラートの不備</td><td>攻撃されても気づけない</td><td>第8章</td></tr>
+  <tr><td>A10</td><td>例外的な状況への不適切な対応</td><td>エラー時に安全側に倒れない（例外で認可がすり抜ける、詳細なエラーを表示）</td><td>第3章・第9章</td></tr>
+</table></div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典</div>
+  <p>IPA「情報セキュリティ10大脅威 2026」（2026年1月29日発表、<a href="https://www.ipa.go.jp/security/10threats/10threats2026.html">公式ページ</a>）。OWASP Top 10:2025（<a href="https://top10.owasp.org/2025/ja/">日本語版</a>）。どちらも数年ごとに更新されるので、年に1回は最新版を確認してください。</p>
+</div>
+
+<h2 id="roles">7. 役割分担：開発者は何を受け持つか</h2>
+<div class="table-wrap"><table>
+  <tr><th>役割</th><th>受け持つこと</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/code.svg" alt=""><b>開発者</b></td><td>コードの穴を作らない、部品を最新に保つ、設定をコードで管理する、ログを設計する、事故の初動を知っている</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/server.svg" alt=""><b>インフラ・SRE</b></td><td>ネットワークの公開範囲、OS・ミドルウェアのパッチ、バックアップ、監視基盤</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/defense/shield-check.svg" alt=""><b>セキュリティ担当・専門家</b></td><td>脆弱性診断、脅威情報の分析、インシデント対応の指揮、規程の整備</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/cloud.svg" alt=""><b>クラウド事業者</b></td><td>データセンター・物理機器・仮想化基盤の安全（<span class="term" data-tip="責任共有モデル：クラウド事業者は基盤を、利用者はその上に置いたデータ・設定・権限を守る、という分担。">責任共有モデル</span>）。利用者のデータ・設定・権限は利用者の責任。詳しくは <a href="https://ht-0328.github.io/aws-get-certified/chapters/02-security-iam.html">AWS 合格ノート 第2章</a></td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/people/user.svg" alt=""><b>利用者</b></td><td>パスワードの使い回しをしない、多要素認証を使う、不審なメールのリンクを開かない</td></tr>
+</table></div>
+<p>小さなチームや個人開発では、これらを全部1人で受け持ちます。その場合も「開発者の範囲（コード・部品・設定・運用）」から順に固めるのが、費用対効果の高い順番です。</p>
+
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする</div>
+  <ul style="margin:0">
+    <li><b>脆弱性のニュースを見たら</b>：CVE 番号で検索 → 「使っているか・届くか・直したか」の3問 → 今日中か次のリリースかを決めて、チームに一言で共有する（「〇〇 x.y 以下に RCE。うちは x.z で該当なし」）。</li>
+    <li><b>会議で「脆弱性がある」と言われたら</b>：「どの入口（入力・部品・設定・人）の話か」「壊れるのは漏れる・変わる・止まるのどれか」「CVSS と、外から届くか」を聞く。これで優先度が決まる。</li>
+    <li><b>設計レビューで</b>：「認証はあるが、認可はどこで確認するか」を必ず1回聞く。</li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>ランサムウェア</dt><dd>データを暗号化して使えなくし、元に戻す代わりに金銭を要求する不正プログラム。近年は「公開するぞ」と二重に脅す。</dd>
+    <dt>DDoS 攻撃</dt><dd>多数のコンピューターから大量の通信を送りつけ、サービスを使えなくする攻撃（分散型サービス妨害攻撃）。</dd>
+    <dt>フィッシング</dt><dd>本物そっくりの偽メール・偽サイトで、パスワードやカード番号を入力させる手口。</dd>
+    <dt>サプライチェーン攻撃</dt><dd>自分を直接狙わず、使っている部品・委託先・配布経路を汚染して入り込む攻撃。</dd>
+    <dt>ボット</dt><dd>自動で動くプログラム。インターネット上の全アドレスに対して、既知の穴がないかを常時探し回っている。</dd>
+    <dt>IPA</dt><dd>情報処理推進機構。日本の公的機関で、脆弱性対策の資料や10大脅威を公開している。</dd>
+    <dt>OWASP</dt><dd>Web アプリケーションのセキュリティを扱う国際的な非営利団体。Top 10 や Cheat Sheet を公開している。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>セキュリティで守るもの3つと、それぞれが壊れた事故の例を挙げてください。</summary><div class="a">機密性（漏れない）＝情報漏えい。完全性（書き換えられない）＝改ざん・不正送金。可用性（止まらない）＝ランサムウェアによる停止・DDoS。</div></details>
+  <details class="q"><summary>脆弱性・脅威・攻撃・インシデント・リスクの関係を1文で説明してください。</summary><div class="a">脆弱性（穴）に脅威（狙う人・事象）が当たると攻撃が成立しインシデント（事故）になる。リスクはその起きやすさ×被害の大きさ。</div></details>
+  <details class="q"><summary>対策の3種類は何ですか。それぞれ例を1つ。</summary><div class="a">予防（穴をふさぐ：プレースホルダ）、検知（気づく：ログイン失敗のアラート）、回復（元に戻す：バックアップ）。</div></details>
+  <details class="q"><summary>攻撃の4つの入口と、開発者が直接ふさげるのはどれですか。</summary><div class="a">入力・部品・設定・人。開発者が直接ふさげるのは入力・部品・設定。人は多要素認証と最小権限で被害を限定する。</div></details>
+  <details class="q"><summary>認証と認可の違いを、事故の例を使って説明してください。</summary><div class="a">認証＝あなたは誰か（ログイン）。認可＝何をしてよいか。ログイン済みの利用者が URL の ID を変えて他人の注文を見られるのは、認証は通っているが認可が抜けている事故。</div></details>
+  <details class="q"><summary>CVE と CVSS は何ですか。CVSS で「重要」「緊急」の境目は？</summary><div class="a">CVE＝脆弱性の世界共通の番号。CVSS＝深刻度の点数（0〜10）。7.0 以上が高（重要）、9.0 以上が緊急。</div></details>
+  <details class="q"><summary>ゼロデイ・PoC・EoL をそれぞれ一言で。</summary><div class="a">ゼロデイ＝修正が出る前に悪用されている。PoC＝攻撃できることを示すコード（公開されると攻撃が急増）。EoL＝サポート終了で今後パッチが出ない。</div></details>
+  <details class="q"><summary>脆弱性のニュースを見たとき、自分への影響を判断する3問は？</summary><div class="a">その部品を使っているか／攻撃経路が外から届くか／修正版に上げた（回避策を入れた）か。3つそろったときだけ緊急。</div></details>
+  <details class="q"><summary>IPA 10大脅威 2026（組織）の上位4つと、開発者に直結する2つは？</summary><div class="a">1位 ランサム攻撃、2位 サプライチェーン・委託先、3位 AI の利用、4位 システムの脆弱性の悪用。直結は2位と4位。</div></details>
+  <details class="q"><summary>OWASP Top 10:2025 の1位と、新しく入った分類を挙げてください。</summary><div class="a">1位はアクセス制御の不備。新顔は A03 ソフトウェアサプライチェーンの不備と A10 例外的な状況への不適切な対応。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+<script>
+(function () {
+  // CVSS の点数 → 区分（v3.x / v4.0 共通）と対応の目安
+  var input = document.getElementById("cvss"), score = document.getElementById("cvss-score"), band = document.getElementById("cvss-band");
+  function describe(v) {
+    if (v === 0) return { name: "なし（None）", color: "var(--surface-2)", ink: "var(--ink)", tip: "影響なし。" };
+    if (v < 4) return { name: "低（Low）", color: "var(--green-soft)", ink: "var(--green)", tip: "計画的に更新する。単独で大きな被害になることは少ないが、他の穴と組み合わされることがある。" };
+    if (v < 7) return { name: "中（Medium）", color: "var(--orange-soft)", ink: "var(--orange)", tip: "次の定期リリースまでに更新する。外から届く構成なら前倒しする。" };
+    if (v < 9) return { name: "高（High）", color: "var(--red-soft)", ink: "var(--red)", tip: "重要。数日以内に対応する。外から届くなら今週中。" };
+    return { name: "緊急（Critical）", color: "var(--purple-soft)", ink: "var(--purple)", tip: "今日中に「使っているか・届くか」を確かめ、該当すれば即日で修正版か回避策。" };
+  }
+  function render() {
+    var v = parseFloat(input.value);
+    var d = describe(v);
+    score.textContent = v.toFixed(1);
+    band.style.background = d.color; band.style.color = d.ink;
+    band.innerHTML = d.name + "<small>" + d.tip + "</small>";
+  }
+  input.addEventListener("input", render);
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発の流れに組み込む：設計・レビュー・自動検査 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .ws { display: grid; gap: 12px; }
+  .ws .row { display: grid; gap: 6px; }
+  .ws .row > b { font-size: .92rem; }
+  .ws .checks { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: .92rem; }
+  .ws .checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ws .checks input { accent-color: var(--accent); width: 18px; height: 18px; }
+  .ws .stride { display: grid; gap: 8px; grid-template-columns: 1fr; }
+  .ws .stride label { display: grid; grid-template-columns: 7.5em 1fr; gap: 8px; align-items: center; font-size: .9rem; }
+  .ws .stride label b { color: var(--accent-ink); }
+  .ws .stride .field { padding: 8px 12px; font-size: .92rem; }
+  @media (max-width: 560px) { .ws .stride label { grid-template-columns: 1fr; } }
+  .ws .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .copied { font-size: .85rem; color: var(--green); font-weight: 700; }
+  .timeline { display: flex; gap: 6px; align-items: stretch; justify-content: center; flex-wrap: wrap; }
+  .timeline .stage { flex: 1; min-width: 110px; max-width: 170px; background: var(--surface-2); border-radius: 10px; padding: 10px 10px 8px; text-align: center; font-size: .82rem; line-height: 1.5; }
+  .timeline .stage b { display: block; font-size: .95rem; margin-bottom: 4px; }
+  .timeline .stage .cost { display: block; margin-top: 6px; font-weight: 800; }
+  .timeline .stage.c1 .cost { color: var(--green); }
+  .timeline .stage.c2 .cost { color: var(--accent-ink); }
+  .timeline .stage.c3 .cost { color: var(--orange); }
+  .timeline .stage.c4 .cost { color: var(--red); }
+  .timeline .stage.c5 .cost { color: var(--purple); }
+</style>
+</head>
+<body data-root="../" data-page="ch09">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第9章</div>
+<p><span class="badge impl">実装</span><span class="badge ops">運用</span></p>
+<h1>第9章 開発の流れに組み込む：設計・レビュー・自動検査</h1>
+<p class="lead">第2〜8章の知識を「気をつける」で終わらせず、設計・レビュー・CI・テストの流れに組み込んで、忘れても引っかかる仕組みにします。設計のときに15分だけ「悪用されたら」を考え、PR テンプレートに観点を入れ、CI に自動検査を足す。この3つで、人が覚えていなくても穴の大半が止まります。AI にコードを書かせる時代の注意点もここで扱います。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>穴は早く見つけるほど安く直せる（シフトレフト）</b>：設計で見つければ図を直すだけ、運用で見つければ事故対応と作り直し
+      <ul>
+        <li>認可モデルの抜け（誰が何に何をしてよいか）は、実装後に見つかると API 全体の作り直しになる</li>
+        <li>OWASP Top 10:2025 の A06「安全性を欠いた設計」は、コードをいくら直しても消えない穴のこと</li>
+      </ul>
+    </li>
+    <li><b>設計のときに4つの問いで15分</b>：何を作るのか／何がまずくなりうるか／どう対処するか／それで十分か
+      <ul>
+        <li>扱うデータを分類し（個人情報・認証情報・決済情報・社外秘・公開情報）、信頼境界（ブラウザ｜アプリ｜DB｜外部）を線で引く</li>
+        <li>STRIDE の6つで「まずいこと」を洗い出す：なりすまし・改ざん・否認・情報漏えい・サービス妨害・権限昇格</li>
+        <li>結果は Markdown 1枚で設計書か PR に残す（この章のワークシートで作れる）</li>
+      </ul>
+    </li>
+    <li><b>実装の約束は3つ</b>：第2章の10のルールを守る／フレームワークの安全な既定値を外さない／エラーは安全側に倒す（fail closed）
+      <ul>
+        <li>例外が起きたとき「見せる・通す」側に倒れると、認可がすり抜ける（OWASP A10）</li>
+        <li>利用者に見せるエラーは一般的な文＋問い合わせ番号。詳細はログへ</li>
+      </ul>
+    </li>
+    <li><b>レビューは9つの観点で見る</b>：入力・出力・認証・認可・秘密・依存・設定・ログ・エラー
+      <ul>
+        <li>観点は PR テンプレートに入れて、毎回思い出さなくても目に入るようにする</li>
+        <li>認可（他人の ID を入れたらどこで弾かれるか）は自動ツールが見つけられないので、人が必ず見る</li>
+      </ul>
+    </li>
+    <li><b>自動検査は CI に、この順で足す</b>：シークレットスキャン（gitleaks）→ 依存スキャン（Dependabot・npm audit・pip-audit・Trivy）→ SAST（Semgrep・CodeQL）→ IaC スキャン（Checkov・Trivy）→ DAST（OWASP ZAP、自分の環境だけ）
+      <ul>
+        <li>CI のトークンは <code>permissions: contents: read</code> から始める（最小権限）</li>
+        <li>誤検知の除外には、理由と見直し期限を書く</li>
+      </ul>
+    </li>
+    <li><b>テストは異常系と認可を自動化する</b>：利用者 A のまま B のデータにアクセスして 403 になるテストを書く。直した脆弱性は回帰テストにする。専門家の脆弱性診断は公開前・大きな変更後・年1回</li>
+    <li><b>AI が書いたコードもレビュー対象</b>：<code>shell=True</code>・<code>verify=False</code>・MD5 のような危険な既定値を出すことがある。秘密をプロンプトに貼らない
+      <ul>
+        <li>LLM を組み込むアプリでは、外から来た文章（Web ページ・メール・ファイル）を命令として扱わない（プロンプトインジェクション）。ツール実行は最小権限、出力をそのまま SQL やコマンドにしない</li>
+        <li>IPA「情報セキュリティ10大脅威 2026」の3位は「AI の利用をめぐるサイバーリスク」</li>
+      </ul>
+    </li>
+    <li><b>チームへは小さく始めて続ける</b>：PR テンプレート → チェックリスト → 15分の勉強会 → 振り返りの共有 → 年1回の見直し。担当を1人決める</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>シフトレフト：後で直すほど高くつく</li>
+    <li>設計：データ分類・信頼境界・簡易脅威モデリング（ワークシート付き）</li>
+    <li>実装の約束：10のルール・安全な既定値・fail closed</li>
+    <li>レビューの観点と PR テンプレート</li>
+    <li>自動検査を CI へ</li>
+    <li>テスト：異常系・認可・回帰・脆弱性診断</li>
+    <li>AI コーディングと生成コードの注意</li>
+    <li>チームへの広げ方</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>「他人の注文が見える」穴を、設計で見つけた場合と、公開後に見つけた場合で、直す手間はどう違うか。</li>
+    <li>認可の確認処理で例外が起きたとき、<code>return True</code> と <code>return False</code> のどちらに倒すべきか。</li>
+    <li>CI に自動検査を足すなら、最初の1つは何にするか。</li>
+  </ul>
+</div>
+
+<h2 id="shift-left">1. シフトレフト：後で直すほど高くつく</h2>
+<p>開発の流れを左から右へ「要件 → 設計 → 実装 → テスト → 運用」と並べたとき、セキュリティの確認をできるだけ<b>左（早い段階）</b>に寄せることを<span class="term" data-tip="シフトレフト（Shift Left）：セキュリティの確認を、開発の流れの早い段階（左側）に移すこと。">シフトレフト</span>と呼びます。理由は単純で、<b>同じ穴でも見つかる段階が遅いほど、直す手間と被害が大きくなる</b>からです。</p>
+<div class="diagram">
+  <div class="dtitle">同じ穴（他人の注文が見える）が、どの段階で見つかるかで何が変わるか</div>
+  <div class="timeline">
+    <div class="stage c1"><b>要件</b>「注文は本人と管理者だけ」と一行書く<span class="cost">文を直すだけ</span></div>
+    <div class="stage c2"><b>設計</b>権限の表に抜けが見つかる<span class="cost">表を直すだけ</span></div>
+    <div class="stage c3"><b>実装</b>レビューで「所有者チェックがない」<span class="cost">関数を1つ足す</span></div>
+    <div class="stage c4"><b>テスト</b>認可テストが落ちる<span class="cost">API を複数直す</span></div>
+    <div class="stage c5"><b>運用</b>利用者からの通報・事故<span class="cost">事故対応＋作り直し＋信用</span></div>
+  </div>
+  <div class="cap">左ほど安く、右ほど高い。特に<b>認可モデル（誰が何に何をしてよいか）の抜け</b>は、実装後に見つかると API 全体の作り直しになります。</div>
+</div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>根拠：OWASP Top 10:2025 A06「安全性を欠いた設計」</div>
+  <p>OWASP は「実装の不備」と「設計の不備」を区別しています。設計の不備とは、<b>コードをどれだけ正しく書いても消えない穴</b>のことです。例えば「パスワードリセットの秘密の質問」は、実装が完璧でも質問の答えが推測できれば破られます。対策は脅威モデリング（2節）と、安全な設計パターンの採用です（<a href="https://top10.owasp.org/2025/ja/">OWASP Top 10:2025 日本語版</a>）。</p>
+</div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>家の設計図の段階で「浴室に窓がない」と気づけば線を1本足すだけです。建った後に気づけば壁を壊します。住み始めてから泥棒に入られて気づけば、工事に加えて失った物は戻りません。セキュリティも同じで、<b>図面の段階で15分使う</b>のが最も安い投資です。</p>
+</div>
+
+<h2 id="threat-modeling">2. 設計：データ分類・信頼境界・簡易脅威モデリング</h2>
+<p><span class="term" data-tip="脅威モデリング（Threat Modeling）：作ろうとしているものに対して「何がまずくなりうるか」を体系的に洗い出し、対策を決める設計の作業。">脅威モデリング</span>と聞くと大がかりに思えますが、開発者が設計のときにやるのは<b>4つの問いに15分で答える</b>ことです。</p>
+<div class="steps-grid">
+  <div class="step"><span class="k">問い 1</span><b>何を作るのか</b><p>機能の一言説明、扱うデータの分類、入口（Web 画面・API・アップロード・外部連携・バッチ）、信頼境界の図。</p></div>
+  <div class="step"><span class="k">問い 2</span><b>何がまずくなりうるか</b><p>STRIDE の6分類に沿って、1つずつ「この機能で起きたら」を考える。思いつかない分類は「なし」でよい。</p></div>
+  <div class="step"><span class="k">問い 3</span><b>それにどう対処するか</b><p>各「まずいこと」に、第2〜8章の対策を1つ割り当てる。入力検証・認可チェック・ログ・レート制限など。</p></div>
+  <div class="step"><span class="k">問い 4</span><b>それで十分か</b><p>対処できないものは「受け入れる」と書いて理由を残す。設計書か PR に Markdown で添付する。</p></div>
+</div>
+
+<h3>データを分類する</h3>
+<p>最初にやるのは、その機能が扱うデータを分類することです。分類が決まれば、暗号化・ログに書いてよいか・保持期間・誰が見てよいかが、ほぼ自動で決まります（<a href="05-crypto-secrets.html#pii">第5章 7.</a>）。</p>
+<div class="table-wrap"><table>
+  <tr><th>分類</th><th>例</th><th>決まること</th></tr>
+  <tr><td><b>認証情報</b></td><td>パスワード、セッション ID、API キー、トークン</td><td>平文で保存しない、ログに書かない、漏れたら即ローテーション</td></tr>
+  <tr><td><b>決済情報</b></td><td>カード番号、口座番号</td><td>原則として自分で持たず決済代行に任せる。持つなら法令・業界基準に従う</td></tr>
+  <tr><td><b>個人情報</b></td><td>氏名、住所、メール、購入履歴</td><td>本人と権限者だけが見られる認可、保存の暗号化、保持期間、漏えい時の報告義務</td></tr>
+  <tr><td><b>社外秘</b></td><td>売上、仕様書、ソースコード</td><td>社内でも役割で絞る、持ち出しのログ</td></tr>
+  <tr><td><b>公開情報</b></td><td>商品カタログ、お知らせ</td><td>機密性より完全性（改ざんされない）と可用性を守る</td></tr>
+</table></div>
+
+<h3>信頼境界を線で引く</h3>
+<p><span class="term" data-tip="信頼境界（Trust Boundary）：「ここから先は信用できない」が切り替わる線。線をまたぐデータはすべて検証の対象。">信頼境界</span>とは、「ここから先は信用できない」が切り替わる線です。線をまたいで入ってくるデータは、すべて検証と認可の対象になります。</p>
+<div class="diagram">
+  <div class="dtitle">典型的な Web アプリの信頼境界</div>
+  <div class="grp-row">
+    <div class="grp internet"><div class="glabel"><img src="../assets/icons/asset/globe.svg" alt=""><span class="gtxt">信用できない（インターネット）</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/laptop.svg" alt="">ブラウザ<small>利用者＝攻撃者かも</small></div>
+        <div class="node sm"><img src="../assets/icons/asset/send.svg" alt="">外部 API<small>応答も疑う</small></div>
+      </div>
+    </div>
+    <div class="grp dmz"><div class="glabel"><img src="../assets/icons/asset/server.svg" alt=""><span class="gtxt">自分のアプリ</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/defense/filter.svg" alt="">入力検証</div>
+        <div class="node sm"><img src="../assets/icons/defense/badge-check.svg" alt="">認証・認可</div>
+        <div class="node sm"><img src="../assets/icons/asset/code.svg" alt="">処理</div>
+      </div>
+    </div>
+    <div class="grp trusted"><div class="glabel"><img src="../assets/icons/defense/shield.svg" alt=""><span class="gtxt">守るもの</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/database.svg" alt="">DB</div>
+        <div class="node sm"><img src="../assets/icons/defense/key.svg" alt="">秘密情報</div>
+      </div>
+    </div>
+  </div>
+  <div class="cap">赤から橙へ入る線（リクエスト）、橙から赤へ出る線（応答・外部 API 呼び出し）、橙から緑へ入る線（SQL・鍵の取得）。線をまたぐところが、検証・エスケープ・認可を置く場所です。</div>
+</div>
+
+<h3>STRIDE：まずいことを6つの箱で洗い出す</h3>
+<p><span class="term" data-tip="STRIDE：脅威を6種類に分類する覚え方。Spoofing・Tampering・Repudiation・Information disclosure・Denial of service・Elevation of privilege の頭文字。">STRIDE</span> は「まずいこと」を6種類に分けた覚え方です。思いつきで洗い出すと偏るので、6つの箱を順に見ます。</p>
+<div class="table-wrap"><table>
+  <tr><th>頭文字</th><th>一言</th><th>この機能で起きたら？（例：注文履歴 API）</th><th>対策の章</th></tr>
+  <tr><td><b>S</b> Spoofing</td><td><b>なりすまし</b></td><td>他人のセッション ID で注文履歴を見られる</td><td><a href="04-auth-session.html#session">第4章 4.</a></td></tr>
+  <tr><td><b>T</b> Tampering</td><td><b>改ざん</b></td><td>注文金額や配送先を書き換えられる</td><td><a href="03-injection-xss.html#validation">第3章 7.</a></td></tr>
+  <tr><td><b>R</b> Repudiation</td><td><b>否認</b></td><td>「その注文はしていない」と言われて証明できない</td><td><a href="08-operations-incident.html#logging">第8章 2.</a></td></tr>
+  <tr><td><b>I</b> Information disclosure</td><td><b>情報漏えい</b></td><td>注文 ID を変えると他人の履歴が見える</td><td><a href="04-auth-session.html#idor">第4章 6.</a></td></tr>
+  <tr><td><b>D</b> Denial of service</td><td><b>サービス妨害</b></td><td>大量リクエストで履歴 API が止まる</td><td><a href="07-infra-cloud.html#waf">第7章 5.</a></td></tr>
+  <tr><td><b>E</b> Elevation of privilege</td><td><b>権限昇格</b></td><td>一般利用者が管理者用の全件取得を呼べる</td><td><a href="04-auth-session.html#authz">第4章 6.</a></td></tr>
+</table></div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「なり・かい・ひ・ろう・ぼう・しょう」</div>
+  <p><b>なり</b>すまし・<b>かい</b>ざん・<b>ひ</b>にん・<b>ろう</b>えい・サービス<b>ぼう</b>がい・権限<b>しょう</b>かく。6つを順に唱えながら「この機能で起きたら」を1つずつ考えます。</p>
+</div>
+
+<div class="box">
+  <div class="box-title"><span class="em">📝</span>体験：脅威モデリング・ワークシート（15分版）</div>
+  <p class="muted" style="margin-top:0">機能を1つ思い浮かべて埋めてください。下に Markdown ができるので、コピーして設計書や PR の説明に貼れます。入力は保存されません。</p>
+  <div class="ws">
+    <div class="row"><b>機能名</b><input class="field" id="tm-name" type="text" placeholder="例：注文履歴の表示 API" aria-label="機能名"></div>
+    <div class="row"><b>扱うデータ</b>
+      <div class="checks" id="tm-data">
+        <label><input type="checkbox" value="個人情報">個人情報</label>
+        <label><input type="checkbox" value="認証情報">認証情報</label>
+        <label><input type="checkbox" value="決済情報">決済情報</label>
+        <label><input type="checkbox" value="社外秘">社外秘</label>
+        <label><input type="checkbox" value="公開情報">公開情報</label>
+      </div>
+    </div>
+    <div class="row"><b>入口</b>
+      <div class="checks" id="tm-entry">
+        <label><input type="checkbox" value="Web 画面">Web 画面</label>
+        <label><input type="checkbox" value="公開 API">公開 API</label>
+        <label><input type="checkbox" value="ファイルアップロード">ファイルアップロード</label>
+        <label><input type="checkbox" value="外部サービス連携">外部サービス連携</label>
+        <label><input type="checkbox" value="バッチ">バッチ</label>
+      </div>
+    </div>
+    <div class="row"><b>STRIDE：この機能で起きたら？ → 対策</b>
+      <div class="stride" id="tm-stride">
+        <label><b>S なりすまし</b><input class="field" data-k="S なりすまし" type="text" placeholder="例：他人のセッション ID で操作される → Cookie は HttpOnly・Secure、MFA"></label>
+        <label><b>T 改ざん</b><input class="field" data-k="T 改ざん" type="text" placeholder="例：金額を書き換えられる → 金額はサーバーで再計算"></label>
+        <label><b>R 否認</b><input class="field" data-k="R 否認" type="text" placeholder="例：「削除していない」と言われる → 操作ログに利用者 ID と時刻"></label>
+        <label><b>I 情報漏えい</b><input class="field" data-k="I 情報漏えい" type="text" placeholder="例：ID を変えると他人の注文が見える → 所有者チェックを API ごとに"></label>
+        <label><b>D サービス妨害</b><input class="field" data-k="D サービス妨害" type="text" placeholder="例：大量リクエストで止まる → レート制限"></label>
+        <label><b>E 権限昇格</b><input class="field" data-k="E 権限昇格" type="text" placeholder="例：一般利用者が管理 API を呼べる → 役割チェックをミドルウェアで"></label>
+      </div>
+    </div>
+    <div class="actions"><button class="btn small" id="tm-copy" type="button">📋 Markdown をコピー</button><span class="copied" id="tm-copied" aria-live="polite"></span></div>
+    <div class="out" id="tm-out" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：設計レビューの15分</div>
+  <ol style="margin:0">
+    <li>設計書に「扱うデータの分類」と「入口」を書く（3分）。</li>
+    <li>信頼境界の図を描く。線をまたぐ矢印を数える（3分）。</li>
+    <li>STRIDE を順に唱えて、矢印ごとに「起きたら」を1つずつ書く（6分）。</li>
+    <li>各項目に対策の章を割り当て、対処しないものは「受け入れる」と理由を書く（3分）。</li>
+  </ol>
+  <p style="margin-top:.6em">チェックリストの<a href="../checklist.html#design">「設計のとき」</a>d5 がこの作業です。</p>
+</div>
+
+<h2 id="coding">3. 実装の約束：10のルール・安全な既定値・fail closed</h2>
+<p>実装の約束は3つです。1つ目は<a href="02-ten-rules.html">第2章の10のルール</a>をチームの<span class="term" data-tip="セキュアコーディング規約：危険な書き方を避け、安全な書き方をそろえるためのチームの決まり。">セキュアコーディング規約</span>の最小セットにすること。2つ目は、フレームワークが用意している<b>安全な既定値を外さない</b>こと（テンプレートの自動エスケープ、ORM、CSRF 対策、セッション管理）。既定値を外す書き方（<code>|safe</code>、<code>innerHTML</code>、生 SQL、<code>csrf_exempt</code>）は、それ自体をレビューの対象にします。3つ目が、この節で詳しく扱う<b>エラーを安全側に倒す</b>ことです。</p>
+
+<h3>エラーは安全側に倒す（fail closed）</h3>
+<p>OWASP Top 10:2025 に新しく入った A10「例外的な状況への不適切な対応」は、エラーや想定外の状況で<b>「通す・見せる」側に倒れてしまう</b>穴のことです。<span class="term" data-tip="fail closed：失敗・エラー時に「拒否・遮断」側に倒れる設計。反対は fail open（失敗時に通してしまう）。">fail closed</span>（失敗したら閉じる）が原則です。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：例外で認可がすり抜ける</div><pre class="code"><code><span class="lang">Python</span><span class="k">def</span> can_view(user, order):
+    <span class="k">try</span>:
+        <span class="k">return</span> order.owner_id == user.id <span class="k">or</span> user.is_admin
+    <span class="k">except</span> Exception:
+        <span class="c"># DB が落ちた・値が None だった、などの時に…</span>
+        <span class="hl"><span class="k">return</span> True</span>   <span class="c"># 「見せる」側に倒れている</span></code></pre><div class="why">権限の確認中に例外が起きると、全員が全部見られる状態になります。障害時に攻撃者が待っているのはこの瞬間です。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：迷ったら拒否し、記録する</div><pre class="code"><code><span class="lang">Python</span><span class="k">def</span> can_view(user, order):
+    <span class="k">try</span>:
+        <span class="k">return</span> order.owner_id == user.id <span class="k">or</span> user.is_admin
+    <span class="k">except</span> Exception:
+        log.exception(<span class="s">"authz check failed"</span>,
+                      extra={<span class="s">"user"</span>: user.id, <span class="s">"order"</span>: order.id})
+        <span class="ok"><span class="k">return</span> False</span>  <span class="c"># 迷ったら拒否（fail closed）</span></code></pre><div class="why">確認できないときは拒否します。利用者には「一時的に表示できません」と出し、ログで原因を追います。</div></div>
+</div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：内部情報を画面に出す</div><pre class="code"><code><span class="lang">JavaScript（Express）</span>app.use((err, req, res, next) =&gt; {
+  <span class="hl">res.status(500).send(err.stack);</span>
+  <span class="c">// ファイルパス・ライブラリ名・SQL が丸見え</span>
+});</code></pre><div class="why">スタックトレースは攻撃者への地図です。使っているフレームワークの版やテーブル名がわかると、次の攻撃が絞り込めます。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：一般的な文＋問い合わせ番号、詳細はログ</div><pre class="code"><code><span class="lang">JavaScript（Express）</span>app.use((err, req, res, next) =&gt; {
+  <span class="k">const</span> ref = crypto.randomUUID();
+  logger.error({ ref, err, path: req.path, user: req.user?.id });
+  <span class="ok">res.status(500).json({ message: <span class="s">"処理に失敗しました"</span>, ref });</span>
+});</code></pre><div class="why">利用者には番号だけを見せ、サポートはその番号でログを引けます。本番では必ずデバッグモードを切ります（<a href="07-infra-cloud.html#misconfig">第7章 1.</a>）。</div></div>
+</div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「とりあえず <code>except: pass</code>」は fail open の典型です。握りつぶした例外の先で、認可や検証が飛ばされていないか確かめます。</li>
+    <li>タイムアウトや外部 API の失敗も「例外的な状況」です。認可サービスに繋がらないときに「通す」設定になっていないか見ます。</li>
+    <li>依存ライブラリの追加・更新もコードの変更です。<code>package.json</code> の差分はレビューの対象にします（<a href="06-dependencies.html#choose">第6章 6.</a>）。</li>
+  </ul>
+</div>
+
+<h2 id="review">4. レビューの観点と PR テンプレート</h2>
+<p>セキュリティの観点は9つに整理できます。全部を毎回思い出すのは無理なので、<b>PR テンプレートに書いておいて目に入るようにする</b>のが現実的なやり方です。</p>
+<div class="table-wrap"><table>
+  <tr><th>観点</th><th>見るところ</th><th>レビューで言う一言</th></tr>
+  <tr><td><b>入力</b></td><td>外から来た値がサーバー側で検証されているか。型・長さ・範囲・許可リスト</td><td>「この値、サーバー側でも検証していますか？」</td></tr>
+  <tr><td><b>出力</b></td><td>HTML・SQL・コマンドに文字列をつないでいないか。自動エスケープを外していないか</td><td>「この <code>innerHTML</code>、textContent ではだめですか？」</td></tr>
+  <tr><td><b>認証</b></td><td>自作のログイン処理、パスワードの保存方法、セッションの作り方</td><td>「このパスワード、bcrypt か Argon2 ですか？」</td></tr>
+  <tr><td><b>認可</b></td><td>すべての API で所有者・役割を確認しているか。確認が1か所にまとまっているか</td><td>「他の利用者の ID を入れたら、どこで弾かれますか？」</td></tr>
+  <tr><td><b>秘密</b></td><td>鍵・パスワード・トークンがコードや設定ファイルに入っていないか</td><td>「この鍵、環境変数に出せますか？」</td></tr>
+  <tr><td><b>依存</b></td><td>追加されたライブラリの必要性・メンテ状況、lock ファイルの更新、audit の結果</td><td>「この追加、代わりに標準ライブラリでできませんか？」</td></tr>
+  <tr><td><b>設定</b></td><td>公開範囲・ポート・権限・デバッグモード・CORS の変更</td><td>「このポート、外から見える必要がありますか？」</td></tr>
+  <tr><td><b>ログ</b></td><td>誰が何をしたかが残るか。トークンや個人情報がそのまま出ていないか</td><td>「このログ、トークンがそのまま出ていませんか？」</td></tr>
+  <tr><td><b>エラー</b></td><td>例外時に通す側に倒れていないか。画面に内部情報が出ないか</td><td>「この <code>except</code>、拒否側に倒れていますか？」</td></tr>
+</table></div>
+<h3>PR テンプレートの例</h3>
+<p><code>.github/pull_request_template.md</code> に置くと、PR を作るたびに自動で本文に入ります。項目は本サイトの<a href="../checklist.html">チェックリスト</a>の「Markdown でコピー」で作れます。該当しない項目は「該当なし」と書けばよく、空欄のままにしないのがルールです。</p>
+<pre class="code"><code><span class="lang">Markdown</span>## 概要
+&lt;!-- 何を・なぜ --&gt;
+
+## セキュリティの確認（該当しないものは「該当なし」と書く）
+- [ ] 入力：外から来る値はサーバー側で検証した（型・長さ・範囲・許可リスト）
+- [ ] 出力：SQL はプレースホルダ、HTML は自動エスケープのまま
+- [ ] 認可：他人の ID でアクセスして 403/404 になることを確かめた
+- [ ] 秘密：鍵やトークンをコード・設定ファイルに入れていない
+- [ ] 依存：追加したライブラリの理由を書いた。audit は通った
+- [ ] 設定：公開範囲・権限・デバッグモードの変更はない（あれば理由）
+- [ ] ログ：誰が何をしたかが残る。トークン・個人情報を出していない
+- [ ] エラー：例外時は拒否側。画面に内部情報を出さない
+
+## 脅威モデリング（新機能のとき）
+&lt;!-- ワークシートの Markdown を貼る --&gt;</code></pre>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>飛行機のパイロットは何千時間飛んでいても、離陸前にチェックリストを声に出して読みます。覚えていないからではなく、<b>覚えていても飛ばすことがある</b>と知っているからです。PR テンプレートは開発者のためのそれです。</p>
+</div>
+
+<h2 id="automation">5. 自動検査を CI へ</h2>
+<p>人が見る観点（4節）に加えて、機械が得意なものは<span class="term" data-tip="CI（Continuous Integration）：PR やコミットのたびに自動でビルド・テスト・検査を走らせる仕組み。GitHub Actions など。">CI</span> に任せます。ツールは5種類あり、<b>導入しやすく効果の高い順</b>に足していきます。</p>
+<div class="table-wrap"><table>
+  <tr><th>順</th><th>種類</th><th>見つけるもの</th><th>代表的なツール</th><th>導入の手間</th></tr>
+  <tr><td>1</td><td><img class="ico-s" src="../assets/icons/defense/key.svg" alt=""><b>シークレットスキャン</b></td><td>コミットに混ざった鍵・パスワード・トークン</td><td>gitleaks、GitHub secret scanning（公開リポジトリは自動。push protection も）</td><td>小。設定ほぼ不要</td></tr>
+  <tr><td>2</td><td><img class="ico-s" src="../assets/icons/asset/package-search.svg" alt=""><b>依存スキャン</b></td><td>使っているライブラリの既知の脆弱性（CVE）</td><td>Dependabot、<code>npm audit</code>、<code>pip-audit</code>、Trivy、Snyk</td><td>小。lock ファイルがあれば動く</td></tr>
+  <tr><td>3</td><td><img class="ico-s" src="../assets/icons/asset/file-code.svg" alt=""><b>SAST</b>（静的解析）</td><td>コードの危険な書き方（文字列連結の SQL、<code>shell=True</code>、弱いハッシュ）</td><td>Semgrep、CodeQL（GitHub code scanning）</td><td>中。誤検知の調整が要る</td></tr>
+  <tr><td>4</td><td><img class="ico-s" src="../assets/icons/asset/server.svg" alt=""><b>IaC スキャン</b></td><td>Terraform・Dockerfile・Kubernetes の設定ミス（公開バケット、root 実行）</td><td>Checkov、tfsec、Trivy（config）</td><td>中。IaC があれば</td></tr>
+  <tr><td>5</td><td><img class="ico-s" src="../assets/icons/defense/scan-search.svg" alt=""><b>DAST</b>（動的検査）</td><td>動いているアプリに実際にリクエストを送って見つける穴</td><td>OWASP ZAP（<b>自分の環境だけ</b>に向ける）</td><td>大。テスト環境と時間が要る</td></tr>
+</table></div>
+<div class="diagram">
+  <div class="dtitle">PR を作ると、人の目と機械の目が同時に動く</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/asset/git-pull-request.svg" alt="">PR 作成</div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/brand/githubactions.svg" alt="">CI<small>シークレット・依存・SAST</small></div>
+    <div class="arr">＋</div>
+    <div class="node"><img src="../assets/icons/people/users.svg" alt="">レビュー<small>認可・設計・ログ</small></div>
+    <div class="arr ok">→</div>
+    <div class="node"><img src="../assets/icons/defense/shield-check.svg" alt="">マージ</div>
+  </div>
+  <div class="cap">機械は「既知のパターン」を漏れなく、人は「この仕様で正しいか（認可・設計）」を見ます。どちらか片方では足りません。</div>
+</div>
+<h3>GitHub Actions の例：シークレットスキャンと依存スキャン</h3>
+<p>最初の2つを PR で動かす最小の例です。<code>permissions: contents: read</code> で、ワークフローのトークンを読み取りだけにしているところも要点です（<a href="07-infra-cloud.html#ci">第7章 7.</a>）。</p>
+<pre class="code"><code><span class="lang">YAML（.github/workflows/security.yml）</span>name: security-checks
+on: [pull_request]
+permissions:
+  contents: read            <span class="c"># トークンは最小権限から始める</span>
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    <span class="c"># 履歴も走査する</span>
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          <span class="c"># 組織アカウントはライセンス設定が要る。公式 README を確認</span>
+  deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm audit --audit-level=high   <span class="c"># High 以上で失敗させる</span></code></pre>
+<p>Python なら <code>pip install pip-audit &amp;&amp; pip-audit -r requirements.txt</code>、コンテナなら <code>trivy image</code> を同じ要領で足します。Dependabot は <code>.github/dependabot.yml</code> を置くだけで更新 PR を作ってくれます（<a href="06-dependencies.html#update">第6章 5.</a>）。</p>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「秘・依・静・設・動」の順</div>
+  <p><b>秘</b>密 → <b>依</b>存 → <b>静</b>的解析 → <b>設</b>定（IaC）→ <b>動</b>的検査。前の2つは設定がほぼ要らず、効果が大きい。後ろに行くほど手間が増えるので、前から順に。</p>
+</div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点：誤検知との付き合い方</div>
+  <ul style="margin:0">
+    <li>SAST は誤検知（問題ないのに警告）が出ます。黙らせるために全部除外すると、本物も消えます。<b>除外には理由と見直し期限をコメントで書く</b>（例：<code># nosemgrep: 入力は許可リストで検証済み。2027-04 に見直し</code>）。</li>
+    <li>「CI が赤いのが当たり前」になると誰も見なくなります。最初は High 以上だけで失敗させ、慣れたら基準を上げます。</li>
+    <li>DAST を本番や他人のサービスに向けてはいけません。自分のテスト環境だけです（<a href="study-method.html#dont">学び方 5.</a>）。</li>
+  </ul>
+</div>
+
+<h2 id="testing">6. テスト：異常系・認可・回帰・脆弱性診断</h2>
+<p>通常のテストは「正しい入力で正しく動くか」を見ます。セキュリティのテストは<b>「間違った入力・間違った人で、正しく拒否するか」</b>を見ます。自動テストに次の3種類を足します。</p>
+<div class="table-wrap"><table>
+  <tr><th>種類</th><th>何を書くか</th><th>例</th></tr>
+  <tr><td><b>異常系テスト</b></td><td>想定外の入力で 400 系が返り、処理が進まないこと</td><td>負の数量、長すぎる文字列、別の型、空、記号だけ</td></tr>
+  <tr><td><b>認可テスト</b></td><td>利用者 A のまま B のデータにアクセスして 403 か 404 になること。一般利用者が管理 API を呼べないこと</td><td>下のコード</td></tr>
+  <tr><td><b>回帰テスト</b></td><td>直した脆弱性が再発しないこと。修正 PR には必ず「その穴を突くテスト」を添える</td><td>XSS を直したら、<code>&lt;script&gt;</code> を含む入力がエスケープされて出ることを確かめる</td></tr>
+</table></div>
+<pre class="code"><code><span class="lang">Python（pytest）</span><span class="k">def</span> test_other_users_order_is_forbidden(client, user_a, order_of_b):
+    client.login(user_a)
+    res = client.get(<span class="s">f"/api/orders/{order_of_b.id}"</span>)
+    <span class="k">assert</span> res.status_code <span class="k">in</span> (403, 404)   <span class="c"># 存在を教えたくなければ 404 でもよい</span>
+
+<span class="k">def</span> test_user_cannot_call_admin_api(client, user_a):
+    client.login(user_a)
+    res = client.get(<span class="s">"/api/admin/orders"</span>)
+    <span class="k">assert</span> res.status_code == 403</code></pre>
+<h3>専門家の脆弱性診断を頼む</h3>
+<p>自分たちのテストと自動検査では見つけにくい穴（認可の設計、業務ロジックの悪用、組み合わせ）は、第三者の<span class="term" data-tip="脆弱性診断（ペネトレーションテスト）：専門家が攻撃者の手法で実際にシステムを調べ、穴を報告するサービス。">脆弱性診断</span>に頼ります。</p>
+<div class="table-wrap"><table>
+  <tr><th>いつ</th><th>頼み方で決めること</th></tr>
+  <tr><td>公開前／大きな変更後／年1回</td><td><b>範囲</b>（どの URL・API・アカウント種別）、<b>環境</b>（本番か検証環境か。データは本物でないこと）、<b>期間</b>（いつからいつまで。監視チームに連絡）、<b>報告形式</b>（深刻度と再現手順、修正の確認を含むか）</td></tr>
+</table></div>
+<p><span class="term" data-tip="バグバウンティ：外部の研究者が見つけた脆弱性に報奨金を払う制度。受け付けと対応の体制が整ってから。">バグバウンティ</span>（報奨金制度）もありますが、報告を受け付けて期限内に直す体制が先です。</p>
+
+<h2 id="ai">7. AI コーディングと生成コードの注意</h2>
+<p>AI にコードを書かせることは、もう特別なことではありません。注意点は2つに分かれます。<b>AI が書いたコードを自分のプロダクトに入れるとき</b>と、<b>AI（LLM）を自分のアプリに組み込むとき</b>です。IPA「情報セキュリティ10大脅威 2026」では「AI の利用をめぐるサイバーリスク」が初めて3位に入りました。</p>
+<h3>AI が書いたコードを取り込むとき</h3>
+<div class="table-wrap"><table>
+  <tr><th>起きること</th><th>どうするか</th></tr>
+  <tr><td>学習データに多い<b>古い書き方・危険な既定値</b>をそのまま出す（<code>subprocess.run(cmd, shell=True)</code>、<code>requests.get(url, verify=False)</code>、<code>hashlib.md5</code>、文字列連結の SQL、<code>cors({ origin: "*" })</code>）</td><td>生成コードも<b>人が書いたコードと同じレビュー</b>にかける。4節の9観点と SAST を通す。生成時に「プレースホルダを使う」「shell=True を使わない」と指示を添える</td></tr>
+  <tr><td>存在しないライブラリ名や関数を出す（<span class="term" data-tip="ハルシネーション：AI が事実でない内容をもっともらしく出力すること。存在しないパッケージ名を出すと、その名前で悪意あるパッケージが公開される危険がある。">ハルシネーション</span>）。その名前で悪意あるパッケージが登録されていることがある</td><td>追加するパッケージは公式レジストリで作者・ダウンロード数・更新日を確かめる（<a href="06-dependencies.html#choose">第6章 6.</a>）</td></tr>
+  <tr><td>プロンプトに貼った<b>秘密情報・顧客データ</b>が外部サービスに送られる</td><td>鍵・個人情報・社外秘はプロンプトに貼らない。会社の利用ルールに従う</td></tr>
+  <tr><td>「動いた」で満足し、異常系・認可を考えていないコードになる</td><td>6節のテスト（異常系・認可）を生成コードにも書く</td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ AI が出しがちな例</div><pre class="code"><code><span class="lang">Python</span><span class="k">import</span> subprocess, hashlib
+subprocess.run(<span class="s">f"convert {filename} out.png"</span>, <span class="hl">shell=True</span>)
+digest = <span class="hl">hashlib.md5</span>(password.encode()).hexdigest()
+r = requests.get(url, <span class="hl">verify=False</span>)</code></pre><div class="why"><code>shell=True</code> はコマンドインジェクション（<a href="03-injection-xss.html#command">第3章 3.</a>）、MD5 はパスワードに不可（<a href="04-auth-session.html#password">第4章 2.</a>）、<code>verify=False</code> は証明書の検証を切る（<a href="05-crypto-secrets.html#tls">第5章 2.</a>）。</div></div>
+  <div class="ok"><div class="lbl">✓ レビューで直した例</div><pre class="code"><code><span class="lang">Python</span><span class="k">import</span> subprocess
+<span class="k">from</span> argon2 <span class="k">import</span> PasswordHasher
+subprocess.run([<span class="s">"convert"</span>, filename, <span class="s">"out.png"</span>], <span class="ok">shell=False</span>, check=True)
+digest = <span class="ok">PasswordHasher().hash(password)</span>
+r = requests.get(url)   <span class="c"># 既定で証明書を検証する</span></code></pre><div class="why">引数は配列で渡し、パスワードは Argon2、証明書の検証は既定のまま。「AI が出した」は理由にならず、レビューの基準は同じです。</div></div>
+</div>
+<h3>LLM を自分のアプリに組み込むとき：プロンプトインジェクション</h3>
+<p><span class="term" data-tip="プロンプトインジェクション：LLM に読ませる文章（Web ページ・メール・ファイル・利用者入力）の中に命令を仕込み、開発者の意図と違う動作をさせる攻撃。">プロンプトインジェクション</span>は、LLM に読ませる文章の中に「これまでの指示を無視して〇〇せよ」のような命令を仕込む攻撃です。第3章のインジェクションと同じ構造で、<b>データ（読ませる文章）と命令（開発者の指示）を LLM が区別できない</b>ことが原因です。完全に防ぐ方法はまだないので、被害を限定する設計にします。</p>
+<div class="table-wrap"><table>
+  <tr><th>原則</th><th>具体的に</th></tr>
+  <tr><td>外から来た文章を<b>命令として扱わない</b></td><td>Web ページ・メール・アップロードされたファイル・検索結果は「信用できないデータ」として渡し、システムプロンプトと分ける。それでも混ざる前提で次の2つを守る</td></tr>
+  <tr><td>ツール実行は<b>最小権限と確認</b></td><td>LLM が呼べる API・DB 操作は読み取り中心に絞る。削除・送金・メール送信のような取り消せない操作は人の確認を挟む。LLM に渡す認証情報は利用者本人の権限を超えない</td></tr>
+  <tr><td>出力を<b>そのまま実行しない</b></td><td>LLM の出力を SQL・OS コマンド・HTML として直接使わない。第3章と同じく、プレースホルダ・引数配列・エスケープを通す</td></tr>
+  <tr><td>秘密を<b>プロンプトに入れない</b></td><td>システムプロンプトは「読まれる前提」で書く。鍵や内部 URL を入れない。利用者ごとのデータは利用者の認可を通してから渡す</td></tr>
+</table></div>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>
+  <p>「AI が生成したコードに脆弱性、〇〇が注意喚起」「AI アシスタントに細工した文書を読ませて情報を抜き取る手口」。前者は<b>生成コードをレビューせず取り込んだ</b>話で、対策は「人が書いたコードと同じレビューと自動検査」。後者は<b>プロンプトインジェクション</b>で、対策は「外から来た文章を命令にしない・ツールは最小権限・出力をそのまま実行しない」です。「AI だから特別な対策が要る」のではなく、第3章と第4章の原則をそのまま当てはめます。</p>
+</div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典</div>
+  <p>IPA「情報セキュリティ10大脅威 2026」（組織 3位「AI の利用をめぐるサイバーリスク」、<a href="https://www.ipa.go.jp/security/10threats/10threats2026.html">公式ページ</a>）。OWASP <a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/">Top 10 for Large Language Model Applications</a>（1位がプロンプトインジェクション）。OWASP <a href="https://cheatsheetseries.owasp.org/cheatsheets/Threat_Modeling_Cheat_Sheet.html">Threat Modeling Cheat Sheet</a>（4つの問い）。GitHub Docs の <a href="https://docs.github.com/code-security">Code security</a>（code scanning・secret scanning・Dependabot）。</p>
+</div>
+
+<h2 id="team">8. チームへの広げ方</h2>
+<p>1人で全部を守り続けることはできません。仕組みにして、チームで回します。大きな制度を作るより、<b>小さく始めて続ける</b>ほうが定着します。</p>
+<div class="steps-grid">
+  <div class="step"><span class="k">1週目</span><b>PR テンプレートを入れる</b><p>4節の例を <code>.github/pull_request_template.md</code> に置く。これだけで全員の目に観点が入る。</p></div>
+  <div class="step"><span class="k">2週目</span><b>CI に秘・依を足す</b><p>5節の YAML を入れる。High 以上で止める。止まった PR が出たら、それが最初の教材になる。</p></div>
+  <div class="step"><span class="k">1か月目</span><b>15分の勉強会</b><p>本サイトの章を1つ選び、「自分たちのコードのどこに当てはまるか」だけ話す。長くしない。</p></div>
+  <div class="step"><span class="k">起きたとき</span><b>振り返りを共有する</b><p>インシデントやヒヤリとした出来事を、個人を責めずに「仕組みのどこを直すか」で振り返る（<a href="08-operations-incident.html#incident">第8章 5.</a>）。</p></div>
+  <div class="step"><span class="k">年1回</span><b>見直す</b><p>チェックリスト・権限・公開範囲・依存の EoL を見直す。IPA 10大脅威と OWASP Top 10 の新版を読む（チェックリスト運用 <a href="../checklist.html#ops">o7</a>）。</p></div>
+  <div class="step"><span class="k">ずっと</span><b>担当を1人決める</b><p>専任でなくてよい。脆弱性情報を受け取り、CI の警告を見て、年1回の見直しを呼びかける人。</p></div>
+</div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：今日の PR から</div>
+  <ul style="margin:0">
+    <li>自分の次の PR の説明に、4節の9観点から<b>該当する1つだけ</b>「〜を確認した」と書く。チーム全員でなく自分から始める。</li>
+    <li>新機能の設計レビューで、「この機能が悪用されたら、誰が何を失いますか？」と1回だけ聞く。</li>
+    <li>CI が止めた PR が出たら、「止まってよかった例」として共有する。止めたことを責めない。</li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>シフトレフト</dt><dd>セキュリティの確認を開発の早い段階（要件・設計）に移すこと。早いほど直すのが安い。</dd>
+    <dt>脅威モデリング</dt><dd>作るものに対して「何がまずくなりうるか」を体系的に洗い出し、対策を決める設計の作業。4つの問いと STRIDE で15分。</dd>
+    <dt>信頼境界</dt><dd>「ここから先は信用できない」が切り替わる線。線をまたぐデータはすべて検証・認可の対象。</dd>
+    <dt>STRIDE</dt><dd>なりすまし・改ざん・否認・情報漏えい・サービス妨害・権限昇格の6分類。脅威の洗い出しに使う。</dd>
+    <dt>fail closed</dt><dd>失敗・エラー時に拒否側に倒れる設計。反対の fail open は失敗時に通してしまう。</dd>
+    <dt>SAST／DAST</dt><dd>SAST は実行せずにコードを解析する静的検査。DAST は動いているアプリにリクエストを送る動的検査。</dd>
+    <dt>IaC スキャン</dt><dd>Terraform・Dockerfile などの設定ファイルを解析して、公開バケットや root 実行のような設定ミスを見つける検査。</dd>
+    <dt>誤検知</dt><dd>問題がないのに警告が出ること。除外するときは理由と見直し期限を書く。</dd>
+    <dt>プロンプトインジェクション</dt><dd>LLM に読ませる文章に命令を仕込み、開発者の意図と違う動作をさせる攻撃。データと命令の混同が原因。</dd>
+    <dt>ハルシネーション</dt><dd>AI が事実でない内容をもっともらしく出すこと。存在しないパッケージ名を出すと悪用されうる。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>シフトレフトとは何ですか。なぜ早いほうがよいのですか。</summary><div class="a">セキュリティの確認を要件・設計の段階に寄せること。同じ穴でも、設計で見つければ表を直すだけ、運用で見つければ事故対応と作り直しになり、遅いほど高くつくから。</div></details>
+  <details class="q"><summary>OWASP Top 10:2025 の A06「安全性を欠いた設計」とはどんな穴ですか。</summary><div class="a">コードをどれだけ正しく書いても消えない、設計そのものの穴。例：推測できる「秘密の質問」でのパスワードリセット。対策は脅威モデリングと安全な設計パターン。</div></details>
+  <details class="q"><summary>簡易脅威モデリングの4つの問いは？</summary><div class="a">何を作るのか／何がまずくなりうるか／それにどう対処するか／それで十分か。</div></details>
+  <details class="q"><summary>STRIDE の6分類を日本語で順に言ってください。</summary><div class="a">なりすまし（Spoofing）・改ざん（Tampering）・否認（Repudiation）・情報漏えい（Information disclosure）・サービス妨害（Denial of service）・権限昇格（Elevation of privilege）。</div></details>
+  <details class="q"><summary>信頼境界とは何ですか。線をまたぐデータはどう扱いますか。</summary><div class="a">「ここから先は信用できない」が切り替わる線（ブラウザ｜アプリ｜DB｜外部 API）。線をまたぐデータはすべて検証・エスケープ・認可の対象。</div></details>
+  <details class="q"><summary>実装の約束3つは？</summary><div class="a">第2章の10のルールを守る／フレームワークの安全な既定値（自動エスケープ・ORM・CSRF 対策）を外さない／エラーは安全側に倒す（fail closed）。</div></details>
+  <details class="q"><summary>認可の確認処理で例外が起きたとき、True と False のどちらを返しますか。理由は？</summary><div class="a">False（拒否）。True を返すと障害時に全員が全部見られる fail open になる。OWASP A10「例外的な状況への不適切な対応」。拒否してログに記録する。</div></details>
+  <details class="q"><summary>レビューの9つの観点は？</summary><div class="a">入力・出力・認証・認可・秘密・依存・設定・ログ・エラー。PR テンプレートに書いて目に入るようにする。</div></details>
+  <details class="q"><summary>CI に自動検査を足す順番と、それぞれの代表ツールは？</summary><div class="a">シークレットスキャン（gitleaks）→ 依存スキャン（Dependabot・npm audit・pip-audit・Trivy）→ SAST（Semgrep・CodeQL）→ IaC スキャン（Checkov・Trivy）→ DAST（OWASP ZAP、自分の環境だけ）。</div></details>
+  <details class="q"><summary>SAST の誤検知を除外するときのルールは？</summary><div class="a">除外には理由と見直し期限をコメントで書く。全部除外すると本物も消える。最初は High 以上だけで失敗させる。</div></details>
+  <details class="q"><summary>自動テストに足す3種類と、認可テストの例は？</summary><div class="a">異常系テスト・認可テスト・回帰テスト。認可テストは、利用者 A のまま B のデータ ID にアクセスして 403 か 404 になること、一般利用者が管理 API を呼ぶと 403 になること。</div></details>
+  <details class="q"><summary>AI が書いたコードに出がちな危険な既定値を3つと、プロンプトインジェクションの被害を限定する3原則は？</summary><div class="a">shell=True、verify=False、MD5（ほかに文字列連結の SQL、origin: "*"）。原則は、外から来た文章を命令として扱わない／ツール実行は最小権限と人の確認／出力をそのまま SQL やコマンドにしない（＋秘密をプロンプトに入れない）。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+<script>
+(function () {
+  // 脅威モデリング・ワークシート：入力から Markdown を組み立てる
+  var name = document.getElementById("tm-name");
+  var dataBox = document.getElementById("tm-data"), entryBox = document.getElementById("tm-entry"), strideBox = document.getElementById("tm-stride");
+  var out = document.getElementById("tm-out"), msg = document.getElementById("tm-copied");
+  function checked(box) {
+    return Array.prototype.map.call(box.querySelectorAll("input:checked"), function (i) { return i.value; });
+  }
+  function build() {
+    var lines = ["## 脅威モデリング：" + (name.value.trim() || "（機能名）"), ""];
+    var d = checked(dataBox), e = checked(entryBox);
+    lines.push("- 扱うデータ：" + (d.length ? d.join("、") : "（未選択）"));
+    lines.push("- 入口：" + (e.length ? e.join("、") : "（未選択）"));
+    lines.push("", "| 脅威（STRIDE） | この機能で起きたら → 対策 |", "|---|---|");
+    Array.prototype.forEach.call(strideBox.querySelectorAll("input"), function (i) {
+      var v = i.value.trim();
+      lines.push("| " + i.getAttribute("data-k") + " | " + (v || "なし／未検討") + " |");
+    });
+    lines.push("", "- 対処しないもの・受け入れる理由：", "- 見直し予定：", "", "<!-- 開発者のためのセキュリティ入門 第9章 ワークシート -->");
+    return lines.join("\n");
+  }
+  function render() { out.textContent = build(); }
+  document.querySelectorAll("#tm-name, #tm-data input, #tm-entry input, #tm-stride input").forEach(function (el) {
+    el.addEventListener("input", render); el.addEventListener("change", render);
+  });
+  document.getElementById("tm-copy").addEventListener("click", function () {
+    var md = build();
+    function ok() { msg.textContent = "コピーしました"; setTimeout(function () { msg.textContent = ""; }, 2500); }
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = md; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); ok(); } catch (e) { msg.textContent = "コピーできませんでした"; }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md).then(ok, fallback); else fallback();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

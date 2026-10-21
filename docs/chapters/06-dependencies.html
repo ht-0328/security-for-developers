@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ライブラリと部品の脆弱性：サプライチェーン | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .tree { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .tree .lv { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .tree .pkg { font-size: .72rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--ink-2); }
+  .tree .pkg.bad { background: var(--red-soft); border-color: var(--red); color: var(--red); font-weight: 700; }
+  .tree .lvl { font-size: .72rem; color: var(--ink-3); }
+</style>
+</head>
+<body data-root="../" data-page="ch06">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第6章</div>
+<p><span class="badge impl">実装</span><span class="badge ops">運用</span></p>
+<h1>第6章 ライブラリと部品の脆弱性：サプライチェーン</h1>
+<p class="lead">脆弱性のニュースの大半は、あなたが1行も書いていないコードの話です。フレームワーク、ライブラリ、言語のランタイム、OS、コンテナのベースイメージ。これらの「部品」に穴が見つかると、使っている全員に同時に効きます。この章では、部品の穴の情報を読み、自分への影響を確かめ、更新を日常の作業にする方法を扱います。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>ニュースの大半は部品の穴</b>：自分が書いていないコードに穴が見つかり、使っている全員に効く
+      <ul>
+        <li>直接入れたライブラリが数十個でも、それらが連れてくる間接依存は数百個になる</li>
+        <li>IPA 10大脅威 2026 の2位「サプライチェーンや委託先を狙った攻撃」、OWASP Top 10:2025 の A03「ソフトウェアサプライチェーンの不備」</li>
+        <li>Log4Shell（2021年）は Java のログ出力ライブラリの穴で、世界中のシステムが一斉に対応を迫られた</li>
+      </ul>
+    </li>
+    <li><b>脆弱性情報の読み方は3点</b>：影響バージョンの範囲・修正版・攻撃条件
+      <ul>
+        <li>「使っているか」は lock ファイルと <code>npm ls</code>／<code>pipdeptree</code> で間接依存まで裏を取る</li>
+        <li>第1章の3問（使っているか・届くか・直したか）で今日やるか決める</li>
+      </ul>
+    </li>
+    <li><b>lock ファイルはコミットし、CI は <code>npm ci</code></b>：lock がないと同じコードでも入る版が変わる</li>
+    <li><b>スキャンは CI で毎回</b>：<code>npm audit</code>、<code>pip-audit</code>、Trivy。High 以上で止める。除外するなら理由と期限を書く</li>
+    <li><b>更新は自動で小さく頻繁に</b>：Dependabot か Renovate。セキュリティ更新は即日、通常更新は週1でまとめて。放置 PR はゼロにする</li>
+    <li><b>部品は選んで入れる</b>：メンテされているか・EoL でないか・名前が本物か（typosquatting）・<code>postinstall</code> で何をするか・公式レジストリか</li>
+    <li><b>SBOM は部品表</b>：「何が入っているか」に即答できる状態にしておく。署名と来歴（provenance）で改ざんを見破る</li>
+    <li><b>コンテナも部品</b>：公式の小さいベースイメージ、ダイジェストで固定、定期的に再ビルド、Trivy でスキャン</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>なぜニュースが多いか：部品の穴は全員に効く</li>
+    <li>脆弱性情報の読み方：CVE・NVD・JVN・GitHub Advisory</li>
+    <li>lock ファイルと再現性</li>
+    <li>スキャン：CI で毎回確かめる</li>
+    <li>自動更新：Dependabot と Renovate</li>
+    <li>部品の選び方：入れる前に見ること</li>
+    <li>SBOM と署名：何が入っているかに即答する</li>
+    <li>コンテナ：ベースイメージも部品</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>「ライブラリ〇〇に深刻な脆弱性」のニュースを見た。<code>package.json</code> に〇〇が無ければ、自分には関係ないと言えるか。</li>
+    <li><code>package.json</code> をコミットしていれば、<code>package-lock.json</code> はコミットしなくてもよいか。</li>
+    <li>Dependabot の PR が 40 件たまっている。何が問題か。</li>
+  </ul>
+</div>
+
+<h2 id="why">1. なぜニュースが多いか：部品の穴は全員に効く</h2>
+<p>現代のアプリは、自分で書くコードより<b>他人が書いた部品</b>のほうがはるかに多く含まれています。Web フレームワーク1つを入れると、それが必要とする部品、さらにその部品が必要とする部品、と連鎖します。これを<span class="term" data-tip="依存関係（dependency）：自分のコードが動くために必要な他のライブラリ。直接入れたものを直接依存、それらが連れてくるものを間接依存（推移的依存）という。">依存関係</span>の木と呼びます。</p>
+<div class="diagram">
+  <div class="dtitle">直接依存は数十でも、間接依存は数百になる</div>
+  <div class="tree">
+    <div class="lvl">あなたのコード</div>
+    <div class="lv"><span class="pkg" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:700">app</span></div>
+    <div class="lvl">↓ 直接依存（package.json に書いたもの）</div>
+    <div class="lv"><span class="pkg">express</span><span class="pkg">pg</span><span class="pkg">jsonwebtoken</span><span class="pkg">axios</span><span class="pkg">dotenv</span><span class="pkg">…</span></div>
+    <div class="lvl">↓ 間接依存（連れてこられたもの）</div>
+    <div class="lv"><span class="pkg">body-parser</span><span class="pkg">qs</span><span class="pkg">cookie</span><span class="pkg">send</span><span class="pkg bad">脆弱な部品</span><span class="pkg">debug</span><span class="pkg">ms</span><span class="pkg">…</span></div>
+    <div class="lvl">↓ さらにその依存</div>
+    <div class="lv"><span class="pkg">…</span><span class="pkg">…</span><span class="pkg">…</span><span class="pkg">…</span><span class="pkg">数百個</span></div>
+  </div>
+  <div class="cap">赤い部品の穴は、それを間接的に使っている<b>全世界のアプリ</b>に同時に効きます。だから1件の発見が大きなニュースになり、各社が同じ日に緊急対応します。あなたの <code>package.json</code> に名前が無くても、使っていることがほとんどです。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>事例</th><th>何が起きたか（一行）</th><th>教訓</th></tr>
+  <tr><td><b>Log4Shell</b>（2021年）</td><td>Java の広く使われるログ出力ライブラリ Log4j に、ログに書かれた文字列から任意コードを実行できる穴が見つかった</td><td>「ただのログ」でも部品の穴で RCE になる。間接依存まで確認する仕組みが要る</td></tr>
+  <tr><td><b>xz-utils への不正コード混入</b>（2024年）</td><td>Linux で広く使われる圧縮ライブラリに、メンテナーになりすました人物が長期間かけて裏口を仕込んだ</td><td>部品そのものが改ざんされうる。署名・来歴・配布経路の確認が要る</td></tr>
+</table></div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>家を建てるとき、釘やネジや配線を自分で作る人はいません。市販の建材を使います。ある日「〇〇社の配線に発火の恐れ」と発表されたら、その配線を使った家すべてが対象になります。自分の家にどの建材が使われているかの<b>一覧</b>があれば、該当するかすぐ分かります。無ければ壁を剥がして調べることになります。</p>
+</div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典</div>
+  <p style="margin:0">IPA「<a href="https://www.ipa.go.jp/security/10threats/10threats2026.html">情報セキュリティ10大脅威 2026</a>」組織向け2位「サプライチェーンや委託先を狙った攻撃」。OWASP Top 10:2025 <a href="https://top10.owasp.org/2025/ja/">A03 ソフトウェアサプライチェーンの不備</a>（2021年版の「脆弱で古くなったコンポーネント」が拡張されたもの）。</p>
+</div>
+
+<h2 id="cve">2. 脆弱性情報の読み方：CVE・NVD・JVN・GitHub Advisory</h2>
+<p>部品の脆弱性は、<span class="term" data-tip="CVE：脆弱性1件ごとに付く世界共通の番号。CVE-西暦-連番の形。">CVE</span> 番号で管理され、NVD（米国）・JVN（日本語）・GitHub Advisory Database（パッケージ単位で検索しやすい）で公開されます。どこで読んでも、確かめる項目は同じです。</p>
+<div class="table-wrap"><table>
+  <tr><th>項目</th><th>どこを見るか</th><th>自分の作業</th></tr>
+  <tr><td><b>影響を受けるパッケージと版の範囲</b></td><td>「<code>&lt; 4.17.21</code>」「<code>&gt;= 2.0.0, &lt; 2.3.1</code>」のような表記</td><td>自分の lock ファイルの版と比べる。範囲に入っていれば「使っている」</td></tr>
+  <tr><td><b>修正版</b></td><td>「Patched versions: 4.17.21」</td><td>この版以上に上げる。メジャー更新が必要なら回避策も探す</td></tr>
+  <tr><td><b>攻撃条件</b></td><td>「攻撃者が制御する入力が〇〇関数に渡る場合」「認証不要」「ネットワーク経由」</td><td>自分のコードがその関数をどう使っているか。外からの入力が届くか（第1章の「届くか」）</td></tr>
+  <tr><td><b>深刻度（CVSS）</b></td><td>点数と、Critical／High／Medium／Low</td><td>High 以上は優先。ただし「届くか」とあわせて判断</td></tr>
+  <tr><td><b>回避策</b></td><td>「この設定を無効化すれば影響を受けない」</td><td>すぐ上げられないときの一時対応</td></tr>
+</table></div>
+<p>「使っているか」は <code>package.json</code> や <code>requirements.txt</code> を眺めるだけでは分かりません。<b>間接依存</b>まで含めて、実際に入っている版を確かめます。</p>
+<pre class="code"><code><span class="lang">シェル</span><span class="c"># npm：この部品を誰が連れてきているか（間接依存の経路が出る）</span>
+npm ls lodash
+<span class="c"># 出力例：app@1.0.0 → some-lib@2.1.0 → lodash@4.17.15  ← 範囲に入っていれば影響あり</span>
+
+<span class="c"># Python：pipdeptree で逆引き（この部品に依存しているものを表示）</span>
+pip install pipdeptree
+pipdeptree --reverse --packages requests
+
+<span class="c"># 入っている正確な版</span>
+pip show requests | grep Version</code></pre>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「範囲・修正版・条件」の3点を、lock で裏取り</div>
+  <p>脆弱性情報を見たら、<b>範囲</b>（自分の版は入っているか）、<b>修正版</b>（どこまで上げるか）、<b>条件</b>（外から届く使い方をしているか）の3点だけ読み取ります。「使っているか」の答えは、記憶ではなく lock ファイルと <code>npm ls</code> で出します。</p>
+</div>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる：「広く使われるライブラリ〇〇に深刻な脆弱性、PoC 公開。各社が緊急対応」</div>
+  <ul style="margin:0">
+    <li><b>「広く使われる」</b>→ 直接入れていなくても、間接依存で入っている可能性が高い。<code>npm ls 〇〇</code> で確かめる。</li>
+    <li><b>「深刻な」</b>→ CVSS を見る。RCE か、認証不要か。</li>
+    <li><b>「PoC 公開」</b>→ 自動攻撃が数日で来る。範囲に入っていて外から届くなら今日中。</li>
+    <li><b>「各社が緊急対応」</b>→ 自分も「使っているか・届くか・直したか」の3問で仕分けし、結論をチームに一言で共有する。</li>
+  </ul>
+</div>
+
+<h2 id="lock">3. lock ファイルと再現性</h2>
+<p><code>package.json</code> の <code>"express": "^4.18.0"</code> は「4.18.0 以上 5.0.0 未満のどれか」という<b>範囲</b>の指定です。範囲なので、今日と来月で入る版が変わります。<span class="term" data-tip="lock ファイル：依存ライブラリ（間接依存を含む）の正確なバージョンと整合性ハッシュを記録したファイル。package-lock.json、poetry.lock、Gemfile.lock など。">lock ファイル</span>は「実際に入れた正確な版」を全部記録し、誰がいつ入れても<b>同じ構成</b>になるようにします。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：lock を無視し、CI で範囲から解決する</div><pre class="code"><code><span class="lang">.gitignore</span><span class="hl">package-lock.json</span>   <span class="c"># lock をコミットしていない</span></code></pre><pre class="code"><code><span class="lang">GitHub Actions</span>- run: <span class="hl">npm install</span>   <span class="c"># 範囲内の最新を毎回解決。昨日通ったビルドが今日壊れる</span></code></pre><div class="why">本番とローカルで版が違う、再現できない不具合、知らないうちに脆弱な版が入る、改ざんされた版が混ざっても気づかない。lock がないと「何が入っているか」に答えられません。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：lock をコミットし、CI は lock どおりに入れる</div><pre class="code"><code><span class="lang">GitHub Actions</span>- run: <span class="ok">npm ci</span>   <span class="c"># lock と package.json が食い違えば失敗。lock どおりに入れる</span></code></pre><pre class="code"><code><span class="lang">Python（pip-tools）</span><span class="c"># requirements.in に直接依存だけ書き、ハッシュ付きの requirements.txt を生成</span>
+pip-compile --generate-hashes requirements.in
+<span class="c"># 入れるときはハッシュが一致しないと失敗する</span>
+pip install <span class="ok">--require-hashes</span> -r requirements.txt</code></pre><div class="why">lock には各部品の<span class="term" data-tip="整合性ハッシュ（integrity）：ダウンロードした部品の中身のハッシュ値。lock に記録された値と違えば、改ざんや差し替えとして失敗する。">整合性ハッシュ</span>も入ります。レジストリ側で中身が差し替えられても検知できます。</div></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>エコシステム</th><th>lock ファイル</th><th>CI で使うコマンド</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/npm.svg" alt="">npm</td><td><code>package-lock.json</code></td><td><code>npm ci</code></td></tr>
+  <tr><td>pnpm ／ yarn</td><td><code>pnpm-lock.yaml</code> ／ <code>yarn.lock</code></td><td><code>pnpm install --frozen-lockfile</code> ／ <code>yarn install --immutable</code></td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/python.svg" alt="">Python</td><td><code>poetry.lock</code>、<code>uv.lock</code>、ハッシュ付き <code>requirements.txt</code></td><td><code>poetry install</code>、<code>uv sync --locked</code>、<code>pip install --require-hashes -r requirements.txt</code></td></tr>
+  <tr><td>Ruby</td><td><code>Gemfile.lock</code></td><td><code>bundle install</code>（<code>BUNDLE_FROZEN=true</code>）</td></tr>
+  <tr><td>Go ／ Rust</td><td><code>go.sum</code> ／ <code>Cargo.lock</code></td><td><code>go mod verify</code> ／ <code>cargo build --locked</code></td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/openjdk.svg" alt="">Java</td><td>Gradle の <code>gradle.lockfile</code>（依存ロックを有効化）、Maven は版を固定して書く</td><td>通常のビルド。ロック外の解決を失敗にする設定を入れる</td></tr>
+</table></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「<code>package.json</code> をコミットしていれば十分」→ 範囲の指定なので、入る版は日によって変わります。lock もコミットします。</li>
+    <li>「lock があれば更新しなくてよい」→ 逆です。lock は<b>固定</b>するためのもので、固定したまま放置すると脆弱な版が残ります。固定＋自動更新（5節）がセットです。</li>
+    <li>CI で <code>npm install</code> を使うと lock が書き換わることがあります。CI は <code>npm ci</code>。</li>
+  </ul>
+</div>
+
+<h2 id="scan">4. スキャン：CI で毎回確かめる</h2>
+<p>lock ファイルに記録された版を、脆弱性データベースと突き合わせるのが<span class="term" data-tip="依存関係スキャン（SCA：Software Composition Analysis）：使っている部品とその版を脆弱性データベースと照合し、既知の穴を一覧にする自動検査。">依存関係スキャン</span>です。人の記憶ではなく、CI が毎回やります。</p>
+<div class="table-wrap"><table>
+  <tr><th>ツール</th><th>対象</th><th>コマンド</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/npm.svg" alt=""><b>npm audit</b></td><td>npm の依存</td><td><code>npm audit --audit-level=high</code>（High 以上があれば失敗）</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/pypi.svg" alt=""><b>pip-audit</b></td><td>Python の依存</td><td><code>pip-audit -r requirements.txt</code>、または環境に対して <code>pip-audit</code></td></tr>
+  <tr><td><b>bundler-audit</b></td><td>Ruby の依存</td><td><code>bundle audit check --update</code></td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/owasp.svg" alt=""><b>OWASP Dependency-Check</b></td><td>Java などを含む複数言語</td><td>Maven／Gradle プラグイン、CLI</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/trivy.svg" alt=""><b>Trivy</b></td><td>lock ファイル、コンテナイメージ、IaC、OS パッケージをまとめて</td><td><code>trivy fs --severity HIGH,CRITICAL --exit-code 1 .</code></td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/github.svg" alt=""><b>GitHub Dependabot alerts</b></td><td>リポジトリの依存グラフ</td><td>設定で有効化。該当すると通知と修正 PR が来る</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/snyk.svg" alt=""><b>Snyk</b> など SaaS</td><td>複数言語・コンテナ・IaC</td><td>CI 連携。無料枠あり</td></tr>
+</table></div>
+<pre class="code"><code><span class="lang">.github/workflows/audit.yml</span>name: audit
+on: [push, pull_request]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: <span class="ok">npm audit --audit-level=high</span>     <span class="c"># High 以上が1件でもあれば、このジョブは失敗する</span>
+      - uses: aquasecurity/trivy-action@master   <span class="c"># 本番ではバージョンかコミット SHA で固定する（第7章 7.）</span>
+        with: { scan-type: fs, severity: <span class="s">"HIGH,CRITICAL"</span>, exit-code: <span class="s">"1"</span> }</code></pre>
+<h3>誤検知と「その経路は使っていない」の扱い</h3>
+<p>スキャンは「その版に穴がある」ことしか見ません。実際には「その関数を使っていない」「その機能を無効化している」ことがあります。そうした場合に黙って除外すると、半年後に誰も理由を思い出せません。<b>除外は、理由と期限を書く</b>のが約束です。</p>
+<pre class="code"><code><span class="lang">.trivyignore</span><span class="c"># CVE-XXXX-NNNNN: 影響を受ける XML 解析機能は本アプリでは無効化している（確認: 2026-10-20 田中）</span>
+<span class="c"># 修正版 3.2.0 への更新は 2026-11 のメジャー更新で対応する。期限を過ぎたら再評価</span>
+CVE-XXXX-NNNNN exp:2026-11-30</code></pre>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする</div>
+  <ul style="margin:0">
+    <li><b>今日</b>：自分のリポジトリで <code>npm audit</code>（または <code>pip-audit</code>）を1回回す。出た High 以上を「使っているか・届くか・直したか」で仕分けして、1件だけ直す。</li>
+    <li><b>CI</b>：上の YAML のように、High 以上で失敗する検査を1つ入れる。最初から全部赤になるなら、まず Critical だけで止めて、段階的に下げる。</li>
+    <li><b>レビューで言う一言</b>：「lock は更新されていますか？ audit は通りましたか？」「この除外、理由と期限は書いてありますか？」</li>
+  </ul>
+</div>
+
+<h2 id="update">5. 自動更新：Dependabot と Renovate</h2>
+<p>スキャンで見つけてから直すより、<b>見つかる前から少しずつ上げ続ける</b>ほうが楽で安全です。更新をためると、差分が大きくなって上げられなくなり、そのまま EoL まで放置されます。更新の PR を自動で作るツールが Dependabot と Renovate です。</p>
+<div class="svc"><img src="../assets/icons/brand/dependabot.svg" alt=""><div><div class="name">Dependabot<span class="yomi">ディペンダボット／GitHub 標準</span></div><div class="one">リポジトリに <code>.github/dependabot.yml</code> を置くだけで動く。依存の更新 PR と、脆弱性のある版の通知（alerts）を出す。GitHub Actions やコンテナのベースイメージも対象にできる。</div></div></div>
+<div class="svc"><img src="../assets/icons/brand/renovate.svg" alt=""><div><div class="name">Renovate<span class="yomi">レノベート</span></div><div class="one">GitHub 以外（GitLab など）でも使える。グループ化・自動マージ・更新の時間帯などの設定が細かくできる。<code>renovate.json</code> に <code>config:recommended</code> を書くところから始める。</div></div></div>
+<pre class="code"><code><span class="lang">.github/dependabot.yml（最小の例）</span>version: 2
+updates:
+  - package-ecosystem: <span class="s">"npm"</span>
+    directory: <span class="s">"/"</span>
+    schedule:
+      interval: <span class="s">"weekly"</span>           <span class="c"># 週1回まとめて PR を作る（セキュリティ更新は随時）</span>
+    groups:
+      minor-and-patch:              <span class="c"># マイナー・パッチ更新は1本の PR にまとめる</span>
+        update-types: [<span class="s">"minor"</span>, <span class="s">"patch"</span>]
+  - package-ecosystem: <span class="s">"github-actions"</span>   <span class="c"># CI で使う Actions 自体も部品</span>
+    directory: <span class="s">"/"</span>
+    schedule:
+      interval: <span class="s">"weekly"</span></code></pre>
+<pre class="code"><code><span class="lang">renovate.json（最小の例）</span>{
+  <span class="s">"$schema"</span>: <span class="s">"https://docs.renovatebot.com/renovate-schema.json"</span>,
+  <span class="s">"extends"</span>: [<span class="s">"config:recommended"</span>]
+}</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>運用ルールの例</th><th>内容</th></tr>
+  <tr><td><b>セキュリティ更新は即日</b></td><td>脆弱性に対応する PR は、テストが通れば当日マージする。担当を決めておく。</td></tr>
+  <tr><td><b>通常の更新は週1でまとめて</b></td><td>決まった曜日に、たまった PR をまとめて確認・マージする。グループ化で PR の数を減らす。</td></tr>
+  <tr><td><b>メジャー更新は計画的に</b></td><td>破壊的変更を含むので、変更履歴を読んで作業時間を取る。放置せず、四半期に1回は棚卸しする。</td></tr>
+  <tr><td><b>テストがあることが前提</b></td><td>自動更新を安心してマージするには、CI でテストが回ることが要る。テストがない部分は、更新のたびに手で確認する範囲を決めておく。</td></tr>
+  <tr><td><b>放置 PR をゼロに</b></td><td>40 件たまった PR は誰も見ない。たまる前に設定（頻度・グループ化・上限）を見直す。</td></tr>
+</table></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点：Dependabot を入れたから安全</div>
+  <p style="margin:0">PR が作られるだけでは何も変わりません。<b>マージされて初めて</b>穴がふさがります。「有効にしてある」ではなく「先週何件マージしたか」で見ます。CI で使う GitHub Actions 自体やコンテナのベースイメージも更新対象に入れます。</p>
+</div>
+
+<h2 id="choose">6. 部品の選び方：入れる前に見ること</h2>
+<p>部品は入れた瞬間から、更新と脆弱性対応の義務が付いてきます。「便利そう」で入れる前に、次を見ます。</p>
+<div class="table-wrap"><table>
+  <tr><th>見ること</th><th>判断</th></tr>
+  <tr><td><b>メンテされているか</b></td><td>最終更新が1年以上前、issue が放置、メンテナーが1人。更新が止まった部品は脆弱性が直らない。代替を探す。</td></tr>
+  <tr><td><b>EoL でないか</b></td><td>言語・フレームワーク・DB・OS のサポート期限は <a href="https://endoflife.date/">endoflife.date</a> で確認する。EoL のものは選ばない。使っているものは EoL の前に上げる計画を持つ。</td></tr>
+  <tr><td><b>名前が本物か</b></td><td><span class="term" data-tip="typosquatting：有名なパッケージと1文字違いの名前で悪意あるパッケージを公開し、打ち間違いで入れさせる手口。">typosquatting</span>（1文字違いの偽物）。公式サイトからリンクされた名前をコピーして入れる。ダウンロード数と公開日を見る。</td></tr>
+  <tr><td><b>社内パッケージ名が公開レジストリにないか</b></td><td><span class="term" data-tip="依存関係の混乱（dependency confusion）：社内パッケージと同じ名前を公開レジストリに登録し、ツールがそちらを優先して取り込んでしまうのを狙う手口。">依存関係の混乱</span>への対策。社内パッケージはスコープ（<code>@mycompany/…</code>）を付け、レジストリの設定で取得元を固定する。</td></tr>
+  <tr><td><b>インストール時に何を実行するか</b></td><td>npm の <code>postinstall</code> スクリプトは、入れた瞬間に任意のコードを動かせる。見知らぬ部品はスクリプトの中身を見る。CI では <code>npm ci --ignore-scripts</code> も検討する（動かなくなる部品もあるので確認）。</td></tr>
+  <tr><td><b>公式レジストリから入れているか</b></td><td>GitHub の URL や個人のミラーから直接入れない。lock の整合性ハッシュで中身を固定する。</td></tr>
+  <tr><td><b>本当に要るか</b></td><td>数行で書ける処理のために依存を増やさない。部品が1つ増えるごとに、間接依存と更新の手間が増える。</td></tr>
+</table></div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「生きてる・期限内・本物・中身」</div>
+  <p>メンテが<b>生きてる</b>か、サポート<b>期限内</b>か、名前が<b>本物</b>か、インストール時の<b>中身</b>（スクリプト）は何か。4つ見てから入れます。</p>
+</div>
+
+<h2 id="sbom">7. SBOM と署名：何が入っているかに即答する</h2>
+<p><span class="term" data-tip="SBOM（Software Bill of Materials）：ソフトウェアの部品表。使っている部品の名前・版・来歴を機械可読な形式で一覧にしたもの。">SBOM</span> は「部品表」です。脆弱性のニュースが出たとき、「うちは入っているか」に<b>即答できる</b>ことが目的です。lock ファイルも簡易な部品表ですが、SBOM は標準形式（<b>CycloneDX</b>、<b>SPDX</b>）で、コンテナの OS パッケージまで含めて出力でき、取引先への提出にも使えます。</p>
+<pre class="code"><code><span class="lang">シェル</span><span class="c"># npm 9.5 以降：CycloneDX 形式の SBOM を出力</span>
+npm sbom --sbom-format cyclonedx &gt; sbom.json
+
+<span class="c"># Trivy：ディレクトリやコンテナイメージから SBOM を出力</span>
+trivy fs --format cyclonedx --output sbom.json .
+trivy image --format cyclonedx --output sbom.json myapp:1.2.3
+
+<span class="c"># 作った SBOM を脆弱性データベースと照合する</span>
+trivy sbom sbom.json</code></pre>
+<p>部品そのものの改ざん（xz-utils の事例）に対しては、<b>署名</b>と<b>来歴（provenance）</b>で「誰が、どのソースから、どのビルド環境で作ったか」を確かめる仕組みが広がっています。<span class="term" data-tip="Sigstore：ソフトウェアの署名と検証を簡単にするオープンソースの仕組み。コンテナや成果物の署名に cosign を使う。">Sigstore</span>（cosign）、npm の provenance（<code>npm publish --provenance</code>）などです。利用者としては「署名・来歴が付いている部品を選び、検証を CI に入れる」が目標です。まずは SBOM を出せる状態から始めます。</p>
+
+<h2 id="container">8. コンテナ：ベースイメージも部品</h2>
+<p>Docker イメージは「OS のパッケージ ＋ 言語のランタイム ＋ 自分のアプリ」の全部入りです。<code>FROM</code> で指定する<span class="term" data-tip="ベースイメージ：Dockerfile の FROM で指定する土台のイメージ。OS と言語ランタイムを含む。これ自体が更新と脆弱性対応の対象。">ベースイメージ</span>は巨大な部品であり、同じように穴が見つかり、同じように更新が要ります。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：latest・フル OS・更新なし</div><pre class="code"><code><span class="lang">Dockerfile</span>FROM <span class="hl">node:latest</span>          <span class="c"># 毎回違うものが入る。何が入ったか分からない</span>
+COPY . .
+RUN <span class="hl">npm install</span>           <span class="c"># lock を無視。開発用の部品まで入る</span>
+CMD ["node", "server.js"]  <span class="c"># root で動く</span></code></pre><div class="why">フルサイズの OS イメージは数百のパッケージを含み、その分だけ脆弱性の件数も増えます。<code>latest</code> は再現性がなく、ビルドのたびに中身が変わります。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：小さい公式イメージをダイジェストで固定</div><pre class="code"><code><span class="lang">Dockerfile</span><span class="c"># 公式の slim（または distroless／alpine）を、タグ＋ダイジェストで固定。Renovate が更新 PR を出す</span>
+FROM <span class="ok">node:22-slim@sha256:&lt;ダイジェスト&gt;</span>
+WORKDIR /app
+COPY package*.json ./
+RUN <span class="ok">npm ci --omit=dev</span>       <span class="c"># lock どおり。開発用の部品は入れない</span>
+COPY . .
+<span class="ok">USER node</span>                   <span class="c"># root で動かさない（第7章 6.）</span>
+CMD ["node", "server.js"]</code></pre><div class="why">小さいイメージは入っている部品が少なく、脆弱性の件数も少なくなります。ダイジェスト固定で「何が入っているか」が確定し、更新は自動更新ツールに任せます。</div></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>やること</th><th>内容</th></tr>
+  <tr><td><b>小さい公式イメージ</b></td><td><code>-slim</code>、<code>-alpine</code>、distroless。入っている部品が少ないほど穴も少ない。</td></tr>
+  <tr><td><b>ダイジェストで固定</b></td><td><code>node:22-slim@sha256:…</code>。タグだけでは中身が変わりうる。更新は Renovate／Dependabot に任せる。</td></tr>
+  <tr><td><b>定期的に再ビルド</b></td><td>アプリのコードが変わらなくても、ベースイメージと OS パッケージの修正を取り込むために週1などで再ビルドして配備する。</td></tr>
+  <tr><td><b>イメージをスキャン</b></td><td><code>trivy image --severity HIGH,CRITICAL --exit-code 1 myapp:1.2.3</code> を CI に。OS パッケージと言語の部品を両方見る。</td></tr>
+  <tr><td><b>root で動かさない</b></td><td><code>USER</code> を指定する。読み取り専用ファイルシステムなどの実行時の設定は<a href="07-infra-cloud.html#container">第7章 6.</a>。</td></tr>
+</table></div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：イメージの確かめ方</div>
+  <ul style="margin:0">
+    <li><b>何が入っているか</b>：<code>docker history myapp:1.2.3</code> で層を見る。<code>trivy image myapp:1.2.3</code> で OS パッケージと言語の部品の脆弱性を一覧にする。</li>
+    <li><b>誰で動いているか</b>：<code>docker run --rm myapp:1.2.3 id</code> で <code>uid=0(root)</code> と出たら、<code>USER</code> の指定が抜けている。</li>
+    <li><b>レビューで言う一言</b>：「<code>FROM</code> はダイジェストで固定されていますか？ 最後に再ビルドしたのはいつですか？」</li>
+  </ul>
+</div>
+
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>確かめるのは自分の環境だけで</div>
+  <p style="margin:0">この章のコマンドは、自分のリポジトリ・自分のイメージに対して使うものです。他社の公開サービスの部品や版を調べて穴を探す行為は、たとえ更新を促す目的でも、不正アクセス禁止法などに触れる可能性があります。気づいたことは、その組織の脆弱性報告窓口や IPA の届出制度を通じて伝えます。</p>
+</div>
+
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典・さらに読む</div>
+  <ul style="margin:0">
+    <li>OWASP Cheat Sheet Series：<a href="https://cheatsheetseries.owasp.org/cheatsheets/Vulnerable_Dependency_Management_Cheat_Sheet.html">Vulnerable Dependency Management</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/NPM_Security_Cheat_Sheet.html">NPM Security</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html">Docker Security</a></li>
+    <li>OWASP Top 10:2025 <a href="https://top10.owasp.org/2025/ja/">A03 ソフトウェアサプライチェーンの不備</a></li>
+    <li>IPA <a href="https://www.ipa.go.jp/security/10threats/10threats2026.html">情報セキュリティ10大脅威 2026</a></li>
+    <li>GitHub Docs <a href="https://docs.github.com/ja/code-security/dependabot">Dependabot</a>、<a href="https://docs.renovatebot.com/">Renovate Docs</a></li>
+    <li><a href="https://endoflife.date/">endoflife.date</a>（サポート期限の一覧）、<a href="https://jvn.jp/">JVN</a>、<a href="https://github.com/advisories">GitHub Advisory Database</a></li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>直接依存・間接依存</dt><dd>自分で <code>package.json</code> などに書いて入れた部品が直接依存。それらが必要として連れてくる部品が間接依存（推移的依存）。</dd>
+    <dt>lock ファイル</dt><dd>間接依存を含む全部品の正確な版と整合性ハッシュを記録したファイル。コミットして、CI は lock どおりに入れる。</dd>
+    <dt>整合性ハッシュ</dt><dd>部品の中身のハッシュ値。lock の値と違えば、改ざんや差し替えとして失敗する。</dd>
+    <dt>依存関係スキャン（SCA）</dt><dd>部品と版を脆弱性データベースと照合する自動検査。npm audit、pip-audit、Trivy。</dd>
+    <dt>typosquatting</dt><dd>有名なパッケージと1文字違いの名前で悪意あるパッケージを公開し、打ち間違いで入れさせる手口。</dd>
+    <dt>依存関係の混乱</dt><dd>社内パッケージと同名のものを公開レジストリに置き、ツールにそちらを優先させる手口。スコープと取得元の固定で防ぐ。</dd>
+    <dt>postinstall</dt><dd>npm がパッケージを入れた直後に実行するスクリプト。任意のコードが動くので、見知らぬ部品は中身を見る。</dd>
+    <dt>SBOM</dt><dd>ソフトウェアの部品表。CycloneDX・SPDX 形式。「何が入っているか」に即答するためのもの。</dd>
+    <dt>来歴（provenance）</dt><dd>その部品が、誰が、どのソースから、どのビルド環境で作ったかの記録。署名とあわせて改ざんを見破る。</dd>
+    <dt>ベースイメージ</dt><dd>Dockerfile の <code>FROM</code> で指定する土台。OS と言語ランタイムを含む巨大な部品。</dd>
+    <dt>ダイジェスト</dt><dd>コンテナイメージの中身のハッシュ（<code>sha256:…</code>）。タグと違い、同じダイジェストなら中身は必ず同じ。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>部品の脆弱性がニュースになりやすい理由を、依存関係の木で説明してください。</summary><div class="a">直接依存が数十でも間接依存は数百になり、1つの部品の穴がそれを間接的に使う全世界のアプリに同時に効くから。</div></details>
+  <details class="q"><summary>Log4Shell（2021年）と xz-utils（2024年）の教訓をそれぞれ一言で。</summary><div class="a">Log4Shell＝「ただのログ出力」の部品でも RCE になる。間接依存まで確認する仕組みが要る。xz-utils＝部品そのものが改ざんされうる。署名・来歴・配布経路の確認が要る。</div></details>
+  <details class="q"><summary>脆弱性情報で読み取る3点は？「使っているか」はどう裏を取るか。</summary><div class="a">影響バージョンの範囲・修正版・攻撃条件。lock ファイルの版と <code>npm ls 〇〇</code>／<code>pipdeptree --reverse</code> で間接依存まで確かめる。</div></details>
+  <details class="q"><summary><code>package.json</code> の <code>^4.18.0</code> はどういう意味か。なぜ lock ファイルが要るか。</summary><div class="a">4.18.0 以上 5.0.0 未満の範囲指定。範囲なので入る版が日によって変わる。lock は実際に入れた正確な版と整合性ハッシュを記録し、誰がいつ入れても同じ構成にする。</div></details>
+  <details class="q"><summary>CI で <code>npm install</code> ではなく <code>npm ci</code> を使う理由は？</summary><div class="a"><code>npm ci</code> は lock どおりに入れ、lock と package.json が食い違えば失敗する。<code>npm install</code> は範囲から解決し lock を書き換えることがある。</div></details>
+  <details class="q"><summary>依存関係スキャンのツールを3つと、CI での止め方は？</summary><div class="a">npm audit、pip-audit、Trivy（ほかに bundler-audit、OWASP Dependency-Check、Dependabot alerts）。High 以上で失敗させる（<code>npm audit --audit-level=high</code>、<code>trivy fs --severity HIGH,CRITICAL --exit-code 1</code>）。</div></details>
+  <details class="q"><summary>スキャン結果を除外するときの約束は？</summary><div class="a">理由（なぜ影響を受けないか）と期限を書く。期限を過ぎたら再評価する。黙って除外しない。</div></details>
+  <details class="q"><summary>Dependabot／Renovate の運用ルールの例を3つ。</summary><div class="a">セキュリティ更新は即日マージ／通常更新は週1でまとめて（グループ化）／メジャー更新は計画的に。放置 PR はゼロにする。テストがあることが前提。</div></details>
+  <details class="q"><summary>部品を入れる前に見る4つは？</summary><div class="a">メンテが生きているか／サポート期限内か（endoflife.date）／名前が本物か（typosquatting）／インストール時のスクリプトの中身。加えて公式レジストリからか、本当に要るか。</div></details>
+  <details class="q"><summary>SBOM とは何か。目的は？</summary><div class="a">ソフトウェアの部品表（CycloneDX・SPDX 形式）。脆弱性のニュースが出たとき「うちは入っているか」に即答できること。<code>npm sbom</code> や <code>trivy</code> で出力できる。</div></details>
+  <details class="q"><summary>コンテナのベースイメージで守る4つは？</summary><div class="a">小さい公式イメージ（slim・alpine・distroless）／ダイジェストで固定／定期的に再ビルド／Trivy でスキャン。加えて root で動かさない。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+</body>
+</html>

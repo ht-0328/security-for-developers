@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>サーバー・クラウド・ネットワークの設定 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../" data-page="ch07">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第7章</div>
+<p><span class="badge impl">実装</span><span class="badge ops">運用</span></p>
+<h1>第7章 サーバー・クラウド・ネットワークの設定</h1>
+<p class="lead">コードに穴がなくても、設定が開いていれば入られます。DB がインターネットから見える、ストレージが全員に公開、デバッグモードのまま本番、初期パスワードのまま。どれも「開けすぎ」が原因で、インターネット全体を巡回するボットが数時間で見つけます。この章では、ネットワーク・権限・ストレージ・応答ヘッダー・コンテナ・CI の「閉じ方」と、設定をコードにして差分で見る方法を扱います。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>設定ミスの原因は「開けすぎ」</b>：OWASP Top 10:2025 の A02「セキュリティ設定の不備」
+      <ul>
+        <li>典型：DB をインターネットに公開、ストレージを全員に公開、デバッグモードのまま本番、初期パスワードのまま、管理画面やサンプルの放置、CORS の <code>*</code></li>
+        <li>見つけるのは人ではなくボット。公開した瞬間から全アドレスを巡回して試す</li>
+        <li>対策の原則は2つ：最小権限（必要な権限だけ）とデフォルト閉（明示的に必要なものだけ開ける）</li>
+      </ul>
+    </li>
+    <li><b>ネットワーク：外に開けるのは 443 だけ</b>
+      <ul>
+        <li>DB・キャッシュ・内部 API は非公開ネットワークに置き、アプリからだけ届くようにする</li>
+        <li>ファイアウォール（セキュリティグループ）は許可リスト。<code>0.0.0.0/0</code> で開けてよいのは 443（と HTTPS への転送用の 80）だけ</li>
+        <li>SSH はパスワード禁止・鍵認証・root ログイン禁止。外からは直接開けず、踏み台か SSM／IAP 経由</li>
+        <li>VPN・リモート接続機器のパッチは最優先（IPA 10大脅威 2026 の8位）</li>
+      </ul>
+    </li>
+    <li><b>クラウドの権限：人には SSO とロール、サービスにはロール</b>
+      <ul>
+        <li>アクセスキーをサーバーやコードに置かない。実行環境のロール（インスタンスロールなど）を使う</li>
+        <li>ルートアカウントは MFA を付けて金庫に。日常では使わない</li>
+        <li><code>"Action": "*"</code> のポリシーは使わない。キーは定期的に棚卸しして消す</li>
+      </ul>
+    </li>
+    <li><b>ストレージ：パブリックアクセスブロックを ON</b>
+      <ul>
+        <li>公開してよいのは静的サイトの配信だけ。それも CDN 経由にしてバケット自体は閉じる</li>
+        <li>一時的に渡したいファイルは、有効期限付きの署名付き URL で</li>
+        <li>バケット名は推測される前提。「名前を知らなければ見えない」は守りにならない</li>
+      </ul>
+    </li>
+    <li><b>応答ヘッダー：7つを付けて <code>curl -I</code> で確かめる</b>
+      <ul>
+        <li>HSTS（HTTPS 固定）、CSP（読み込み元の制限）、<code>X-Content-Type-Options: nosniff</code>、<code>frame-ancestors</code>（埋め込み禁止）、<code>Referrer-Policy</code>、<code>Permissions-Policy</code>、機密ページの <code>Cache-Control: no-store</code></li>
+        <li>Express なら helmet、nginx なら <code>add_header</code>。CSP はまず Report-Only で始める</li>
+        <li>WAF と CDN は保険。根本対策はコードと設定。ログインや API にはレート制限</li>
+      </ul>
+    </li>
+    <li><b>コンテナ：root で動かさない・読み取り専用・秘密を焼かない</b>
+      <ul>
+        <li>Dockerfile に <code>USER</code> を書く。ベースイメージはタグを固定し、定期的に更新する</li>
+        <li>秘密は <code>ENV</code> にも <code>ARG</code> にも書かない。<code>.dockerignore</code> で <code>.env</code> や <code>.git</code> を除外する</li>
+        <li>実行時は読み取り専用ファイルシステム、不要な権限（capability）を落とす</li>
+      </ul>
+    </li>
+    <li><b>CI：トークンの権限を最小に、Action はコミット SHA で固定</b>
+      <ul>
+        <li>GitHub Actions は <code>permissions:</code> を明示して最小にする</li>
+        <li>フォークからの PR にシークレットを渡さない。<code>pull_request_target</code> で PR のコードを実行しない</li>
+        <li>シークレットを <code>echo</code> や変換して出さない。開発機は OS 更新・ディスク暗号化・画面ロック</li>
+      </ul>
+    </li>
+    <li><b>設定はコード（IaC）にして差分で見る</b>：Checkov・tfsec・Trivy で自動検査、手で変えた差分（ドリフト）を検知する</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>設定ミスが事故になる：典型例とボット</li>
+    <li>ネットワーク：公開するもの・しないもの、SSH</li>
+    <li>クラウドの権限：最小権限とロール</li>
+    <li>ストレージの公開設定</li>
+    <li>セキュリティヘッダーと WAF・レート制限</li>
+    <li>コンテナと実行環境</li>
+    <li>ローカルと CI の安全</li>
+    <li>設定をコードにして差分を見る（IaC）</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>「DB にはパスワードを設定しているから、インターネットから接続できても問題ない」は正しいか。</li>
+    <li>セキュリティグループで <code>0.0.0.0/0</code> に 22 番（SSH）を開けている。何が問題か。</li>
+    <li>GitHub Actions で <code>uses: some/action@v3</code> と書くのと、コミット SHA で書くのは何が違うか。</li>
+  </ul>
+</div>
+
+<h2 id="misconfig">1. 設定ミスが事故になる：典型例とボット</h2>
+<p>OWASP Top 10:2025 の A02 は「セキュリティ設定の不備」です。コードの穴と違って、<b>フレームワークやクラウドが用意した機能を「開けたまま」にしているだけ</b>で事故になります。しかも設定は目に見えにくく、レビューの対象から漏れがちです。</p>
+<div class="table-wrap"><table>
+  <tr><th>典型的な設定ミス</th><th>何が起きるか</th><th>正しい状態</th></tr>
+  <tr><td>DB・キャッシュがインターネットから接続できる</td><td>パスワード総当たり、認証なしの DB（既定で認証がないものもある）からデータを丸ごと取られる</td><td>非公開ネットワークに置き、アプリのサーバーからだけ接続できる（2節）</td></tr>
+  <tr><td>ストレージを「全員に公開」</td><td>顧客の書類・バックアップ・ログが誰でもダウンロードできる</td><td>パブリックアクセスブロック ON、署名付き URL（4節）</td></tr>
+  <tr><td>デバッグモードのまま本番</td><td>エラー画面にソースコード・環境変数・DB の接続情報が表示される</td><td>本番ではデバッグを無効化し、環境変数で切り替える</td></tr>
+  <tr><td>初期パスワード・既定の管理者アカウントのまま</td><td>製品のマニュアルに載っているパスワードで管理画面に入られる</td><td>初回に変更。可能なら既定アカウントを無効化</td></tr>
+  <tr><td>ディレクトリ一覧表示・サンプルページ・管理画面の放置</td><td>内部のファイル名や、脆弱性のあるサンプルが攻撃の足がかりになる</td><td>一覧表示を無効化、使わないものは削除、管理画面は IP 制限か MFA</td></tr>
+  <tr><td>CORS で <code>*</code> を許可</td><td>どのサイトからでも API を呼ばれ、利用者のデータを他サイトが読める</td><td>許可する<span class="term" data-tip="オリジン：スキーム（https）＋ホスト名＋ポートの組。ブラウザは異なるオリジン間のアクセスを既定で制限する。">オリジン</span>を列挙する</td></tr>
+  <tr><td>詳細なエラーをそのまま返す</td><td>スタックトレースや SQL から内部構造・ライブラリの版が分かり、次の攻撃に使われる</td><td>利用者には一般的な文、詳細はログへ（第8章）</td></tr>
+</table></div>
+
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：本番でもデバッグ ON、CORS は全開</div><pre class="code"><code><span class="lang">Python（Django settings.py）／ Express</span><span class="c"># settings.py</span>
+<span class="hl">DEBUG = True</span>
+<span class="hl">ALLOWED_HOSTS = ["*"]</span>
+
+<span class="c">// Express</span>
+<span class="k">const</span> cors = require(<span class="s">"cors"</span>);
+app.use(<span class="hl">cors()</span>);  <span class="c">// どのオリジンからでも許可</span></code></pre><div class="why">エラー画面に環境変数や SQL が出る。API がどのサイトからでも呼べる。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：環境変数で切り替え、許可元を列挙</div><pre class="code"><code><span class="lang">Python（Django settings.py）／ Express</span><span class="c"># settings.py</span>
+<span class="k">import</span> os
+<span class="ok">DEBUG = os.environ.get("DJANGO_DEBUG") == "1"</span>
+<span class="ok">ALLOWED_HOSTS = ["app.example.com"]</span>
+
+<span class="c">// Express</span>
+app.use(cors({
+  <span class="ok">origin: ["https://app.example.com"]</span>,
+  credentials: <span class="k">true</span>
+}));</code></pre><div class="why">本番では <code>DJANGO_DEBUG</code> を設定しないので既定で OFF。API を呼べるのは自分のフロントだけ。</div></div>
+</div>
+
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>玄関に高価な鍵（コードの対策）を付けても、裏口が開けっぱなし（設定）なら意味がありません。しかも、泥棒は一軒ずつ下見するのではなく、<b>町中のドアノブを自動で回して回る機械</b>（ボット）を使っています。「うちは小さいから狙われない」は通用せず、開いているドアは順番に見つかります。</p>
+</div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「最小権限」と「デフォルト閉」</div>
+  <p>この章の全節は2つの原則に戻ります。<b>最小権限</b>＝その仕事に必要な権限・経路だけを与える。<b>デフォルト閉</b>＝初期値は閉じておき、必要なものだけ理由を書いて開ける。「なぜこれは開いているのか」に一文で答えられない設定は、閉じる候補です。</p>
+</div>
+
+<h2 id="network">2. ネットワーク：公開するもの・しないもの、SSH</h2>
+<p>ネットワークの設計は、<b>インターネットから直接届く層を最小にする</b>ことに尽きます。利用者が届く必要があるのはロードバランサ（または WAF・CDN）だけで、アプリ・DB は後ろに隠します。</p>
+<div class="diagram">
+  <div class="dtitle">外から届くのは一番手前の層だけ。DB は非公開ネットワークに置く</div>
+  <div class="grp-row">
+    <div class="grp internet">
+      <div class="glabel"><img src="../assets/icons/asset/globe.svg" alt=""><span class="gtxt">インターネット</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/people/users.svg" alt="">利用者</div>
+        <div class="node sm"><img src="../assets/icons/threat/bug.svg" alt="">ボット・攻撃者</div>
+      </div>
+    </div>
+    <div class="grp dmz">
+      <div class="glabel"><img src="../assets/icons/defense/shield-half.svg" alt=""><span class="gtxt">公開層（443 だけ開ける）</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/router.svg" alt="">ロードバランサ<small>WAF・CDN</small></div>
+        <div class="arr">→</div>
+        <div class="node sm"><img src="../assets/icons/asset/server.svg" alt="">アプリ</div>
+      </div>
+    </div>
+    <div class="grp trusted">
+      <div class="glabel"><img src="../assets/icons/defense/lock.svg" alt=""><span class="gtxt">非公開ネットワーク</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/database.svg" alt="">DB</div>
+        <div class="node sm"><img src="../assets/icons/asset/layers.svg" alt="">キャッシュ</div>
+        <div class="node sm"><img src="../assets/icons/asset/network.svg" alt="">内部 API</div>
+      </div>
+    </div>
+  </div>
+  <div class="cap">赤の層から直接届くのは橙の層のロードバランサだけ。アプリは「ロードバランサから」、DB は「アプリから」だけ接続を受け付ける。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>対象</th><th>インターネットに開ける？</th><th>許可元</th></tr>
+  <tr><td>ロードバランサ・WAF・CDN</td><td>開ける（443。80 は HTTPS への転送だけ）</td><td><code>0.0.0.0/0</code></td></tr>
+  <tr><td>アプリのサーバー</td><td>開けない</td><td>ロードバランサのセキュリティグループだけ</td></tr>
+  <tr><td>DB・キャッシュ・メッセージキュー</td><td>開けない</td><td>アプリのセキュリティグループだけ</td></tr>
+  <tr><td>SSH（22）・RDP（3389）</td><td>開けない</td><td>踏み台サーバー、または SSM Session Manager／IAP のような経由サービス。開けるなら自社の固定 IP だけ</td></tr>
+  <tr><td>管理画面・監視ツール</td><td>開けない</td><td>VPN 経由、または IP 制限＋MFA</td></tr>
+</table></div>
+
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：DB を全世界に開けている</div><pre class="code"><code><span class="lang">Terraform（AWS セキュリティグループ）</span>resource <span class="s">"aws_security_group"</span> <span class="s">"db"</span> {
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = <span class="s">"tcp"</span>
+    <span class="hl">cidr_blocks = ["0.0.0.0/0"]</span>
+  }
+}</code></pre><div class="why">「パスワードがあるから大丈夫」ではない。総当たりと、DB 自体の脆弱性が直接狙われる。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：アプリのグループからだけ</div><pre class="code"><code><span class="lang">Terraform（AWS セキュリティグループ）</span>resource <span class="s">"aws_security_group"</span> <span class="s">"db"</span> {
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = <span class="s">"tcp"</span>
+    <span class="ok">security_groups = [aws_security_group.app.id]</span>
+  }
+}</code></pre><div class="why">許可元を「アプリのサーバー」というグループで指定する。IP が変わっても追従する。</div></div>
+</div>
+
+<h3>SSH は鍵認証、root 禁止、外から直接開けない</h3>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：パスワードで root ログイン可</div><pre class="code"><code><span class="lang">/etc/ssh/sshd_config</span><span class="hl">PermitRootLogin yes</span>
+<span class="hl">PasswordAuthentication yes</span>
+Port 22   <span class="c"># しかも 0.0.0.0/0 に開放</span></code></pre><div class="why">公開された SSH は数分で総当たりが始まる。root で入られたら全部終わり。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：鍵だけ、root 禁止</div><pre class="code"><code><span class="lang">/etc/ssh/sshd_config</span><span class="ok">PermitRootLogin no</span>
+<span class="ok">PasswordAuthentication no</span>
+<span class="ok">PubkeyAuthentication yes</span>
+<span class="c"># 設定を反映</span>
+<span class="c"># sudo systemctl reload sshd</span></code></pre><div class="why">鍵認証は総当たりが現実的に不可能。さらに外から直接開けず、踏み台か SSM／IAP を経由する。</div></div>
+</div>
+<p>VPN やリモートデスクトップの<b>機器そのもの</b>の脆弱性を突く攻撃は、IPA 10大脅威 2026 の8位「リモートワーク等の環境や仕組みを狙った攻撃」です。入口の機器のパッチは、アプリより先に当てます。</p>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：開いているものを一覧にする</div>
+  <ul style="margin:0">
+    <li><b>サーバーの中から</b>：<code>ss -tlnp</code>（Linux）で待ち受けているポートを一覧にし、1つずつ「なぜ必要か」を書く。</li>
+    <li><b>クラウドのコンソールから</b>：セキュリティグループで <code>0.0.0.0/0</code> を含むルールを検索する。443 以外があれば理由を確認する。</li>
+    <li><b>外から</b>：自分の管理下にあるサーバーに対してだけ、<code>nmap</code> のようなポートスキャンで外から見える状態を確認する。</li>
+  </ul>
+</div>
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>ポートスキャンは自分のサーバーだけ</div>
+  <p style="margin:0">他人のサーバーや、勤務先でも許可を得ていないサーバーにポートスキャンや接続の試行をしてはいけません。不正アクセス禁止法などに触れるおそれがあり、「確認のつもり」でも通りません。</p>
+</div>
+
+<h2 id="iam">3. クラウドの権限：最小権限とロール</h2>
+<p>クラウドでは、ネットワークの穴より<b>権限の穴</b>のほうが大きな事故になります。長期間有効なアクセスキーが漏れると、攻撃者は正規の API で何でもできるからです。考え方は AWS でも GCP でも Azure でも同じです。</p>
+<div class="table-wrap"><table>
+  <tr><th>対象</th><th>やってはいけない</th><th>正しいやり方</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/people/user.svg" alt="">人</td><td>全員が管理者権限。ルートアカウントを共有</td><td>SSO（IAM Identity Center など）で個人を識別し、役割ごとのロールに割り当てる。ルートアカウントは MFA を付けて日常では使わない</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/server.svg" alt="">サーバー・コンテナ・関数</td><td>アクセスキーを <code>.env</code> やコードに置く</td><td>実行環境に<span class="term" data-tip="ロール：一時的な認証情報を自動で発行してもらう権限のまとまり。サーバーに付ければ、鍵をファイルに置かずにクラウド API を呼べる。">ロール</span>を付ける（インスタンスロール、タスクロール、サービスアカウント）。鍵は自動で発行・更新される</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/workflow.svg" alt="">CI</td><td>管理者権限の長期キーをシークレットに登録</td><td>OIDC 連携で CI の実行ごとに短期の認証情報を得る。権限はデプロイ対象だけ</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/defense/key.svg" alt="">鍵全般</td><td>作りっぱなし。退職者の鍵が残る</td><td>90日などの周期で棚卸しし、使っていない鍵は消す。「最終使用日」を確認する</td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：何でもできるポリシー</div><pre class="code"><code><span class="lang">IAM ポリシー（JSON）</span>{
+  <span class="s">"Version"</span>: <span class="s">"2012-10-17"</span>,
+  <span class="s">"Statement"</span>: [{
+    <span class="s">"Effect"</span>: <span class="s">"Allow"</span>,
+    <span class="hl"><span class="s">"Action"</span>: <span class="s">"*"</span>,</span>
+    <span class="hl"><span class="s">"Resource"</span>: <span class="s">"*"</span></span>
+  }]
+}</code></pre><div class="why">この権限を持つ鍵が漏れたら、全データの削除も、他リージョンでの暗号資産マイニングも可能。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：必要な操作と対象だけ</div><pre class="code"><code><span class="lang">IAM ポリシー（JSON）</span>{
+  <span class="s">"Version"</span>: <span class="s">"2012-10-17"</span>,
+  <span class="s">"Statement"</span>: [{
+    <span class="s">"Effect"</span>: <span class="s">"Allow"</span>,
+    <span class="ok"><span class="s">"Action"</span>: [<span class="s">"s3:GetObject"</span>, <span class="s">"s3:PutObject"</span>],</span>
+    <span class="ok"><span class="s">"Resource"</span>: <span class="s">"arn:aws:s3:::app-uploads/*"</span></span>
+  }]
+}</code></pre><div class="why">このアプリが使うバケットの読み書きだけ。漏れても被害はそのバケットに限られる。</div></div>
+</div>
+<p>IAM のユーザー・グループ・ポリシー・ロールの基本は <a href="https://ht-0328.github.io/aws-get-certified/chapters/02-security-iam.html">AWS 合格ノート 第2章</a> にまとまっています。</p>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「鍵は非公開リポジトリにあるから安全」→ 第5章のとおり、履歴・CI ログ・端末から漏れる。鍵を<b>置かない</b>設計（ロール）が正解。</li>
+    <li>「開発環境だから管理者権限でいい」→ 開発環境の鍵が漏れて本番に横移動する事故は珍しくない。環境ごとにアカウントを分ける。</li>
+  </ul>
+</div>
+
+<h2 id="storage">4. ストレージの公開設定</h2>
+<p>オブジェクトストレージ（S3、Cloud Storage、Blob Storage）の公開設定ミスは、顧客情報の大量漏えいとして最も多く報じられる事故の一つです。原因はほぼ毎回「<b>バケットかオブジェクトを全員に公開していた</b>」です。</p>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>
+  <p>「クラウドのストレージ設定ミスにより、顧客情報〇万件が第三者から閲覧可能な状態になっていた。外部からの指摘で判明。」</p>
+  <ul style="margin:0">
+    <li>「設定ミス」→ ほぼ必ず、公開設定（ACL かバケットポリシー）が「全員」になっていた</li>
+    <li>「閲覧可能な状態」→ 実際に取られたかは不明でも、公開されていた期間は「取られた前提」で報告義務の判断をする（第8章 7.）</li>
+    <li>「外部からの指摘で判明」→ 自分では気づけなかった＝公開状態を検知する仕組みがなかった</li>
+  </ul>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>やりたいこと</th><th>やってはいけない</th><th>正しいやり方</th></tr>
+  <tr><td>利用者がアップロードした書類を保管する</td><td>バケットを公開して URL を知っている人だけ見る運用</td><td>バケットは非公開。アプリが認可を確認したうえで<span class="term" data-tip="署名付き URL：有効期限と対象ファイルを指定して発行する、一時的なダウンロード／アップロード用の URL。">署名付き URL</span>（有効期限 数分〜1時間）を発行する</td></tr>
+  <tr><td>静的サイト・画像を配信する</td><td>バケットを公開して直接配信</td><td>CDN（CloudFront など）経由で配信し、バケットは CDN からだけ読めるようにする</td></tr>
+  <tr><td>バックアップ・ログを置く</td><td>同じアカウント・同じ権限で読み書き</td><td>別アカウントか別の権限で、書き込み専用＋バージョニング＋オブジェクトロック（第8章 4.）</td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：公開バケットに置いて URL を配る</div><pre class="code"><code><span class="lang">Python（boto3）</span>s3.upload_file(path, <span class="s">"app-uploads"</span>, key,
+    <span class="hl">ExtraArgs={"ACL": "public-read"}</span>)
+url = <span class="s">f"https://app-uploads.s3.amazonaws.com/{key}"</span>
+<span class="c"># 「URL を知っている人だけ」は守りにならない</span></code></pre><div class="why">バケット名もキーも推測・列挙される。公開した瞬間から全世界から読める。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：非公開のまま、期限付きの URL を発行</div><pre class="code"><code><span class="lang">Python（boto3）</span>s3.upload_file(path, <span class="s">"app-uploads"</span>, key)  <span class="c"># 既定は非公開</span>
+<span class="c"># 認可（この利用者がこのファイルを見てよいか）を確認してから</span>
+url = s3.generate_presigned_url(
+    <span class="s">"get_object"</span>,
+    Params={<span class="s">"Bucket"</span>: <span class="s">"app-uploads"</span>, <span class="s">"Key"</span>: key},
+    <span class="ok">ExpiresIn=600</span>)  <span class="c"># 10分で失効</span></code></pre><div class="why">バケットは閉じたまま。URL が漏れても10分で使えなくなる。</div></div>
+</div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：公開を「できなくする」</div>
+  <ul style="margin:0">
+    <li>S3 なら<b>パブリックアクセスブロック</b>の4つ（<code>BlockPublicAcls</code>・<code>IgnorePublicAcls</code>・<code>BlockPublicPolicy</code>・<code>RestrictPublicBuckets</code>）を<b>アカウント全体</b>で ON にする。これで誰かが誤って公開しようとしても弾かれる。</li>
+    <li>コンソールの「パブリック」バッジや、<code>aws s3api get-public-access-block --bucket &lt;名前&gt;</code> で確認する。</li>
+    <li>公開配信が本当に必要なバケットだけ例外にし、理由を IaC のコメントに書く。</li>
+  </ul>
+</div>
+
+<h2 id="headers">5. セキュリティヘッダーと WAF・レート制限</h2>
+<p>サーバーが返す HTTP の<span class="term" data-tip="応答ヘッダー：サーバーがブラウザに返す付加情報。表示の仕方や、ブラウザに守らせる規則を伝える。">応答ヘッダー</span>には、「このサイトではこう振る舞え」とブラウザに指示するものがあります。付けるだけで、XSS・クリックジャッキング・HTTP への格下げなど複数の攻撃の被害を抑えられます。</p>
+<div class="table-wrap"><table>
+  <tr><th>ヘッダー</th><th>何をするか</th><th>推奨値の例</th></tr>
+  <tr><td><code>Strict-Transport-Security</code><br><small class="muted">HSTS</small></td><td>以後このサイトには HTTPS でだけ接続するようブラウザに記憶させる</td><td><code>max-age=31536000; includeSubDomains</code></td></tr>
+  <tr><td><code>Content-Security-Policy</code><br><small class="muted">CSP</small></td><td>スクリプト・画像などの読み込み元を制限する。XSS の被害を抑える最後の砦</td><td>まず <code>Content-Security-Policy-Report-Only</code> で <code>default-src 'self'</code> から始め、違反の報告を見ながら本番化する</td></tr>
+  <tr><td><code>X-Content-Type-Options</code></td><td>ブラウザが Content-Type を勝手に推測して実行するのを止める</td><td><code>nosniff</code></td></tr>
+  <tr><td><code>frame-ancestors</code>（CSP）<br><small class="muted">旧 <code>X-Frame-Options</code></small></td><td>他サイトの iframe に埋め込まれるのを禁止する（クリックジャッキング対策。第4章）</td><td><code>frame-ancestors 'none'</code>（旧：<code>X-Frame-Options: DENY</code>）</td></tr>
+  <tr><td><code>Referrer-Policy</code></td><td>リンク先に自分の URL（トークン付きのことも）を送りすぎない</td><td><code>strict-origin-when-cross-origin</code></td></tr>
+  <tr><td><code>Permissions-Policy</code></td><td>カメラ・マイク・位置情報など、使わない機能を無効化する</td><td><code>camera=(), microphone=(), geolocation=()</code></td></tr>
+  <tr><td><code>Cache-Control</code></td><td>機密ページをブラウザや中継機器にキャッシュさせない</td><td>ログイン後のページに <code>no-store</code></td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 不足している例：ヘッダーなし</div><pre class="code"><code><span class="lang">curl -I https://app.example.com</span>HTTP/2 200
+content-type: text/html; charset=utf-8
+server: nginx/1.24.0
+<span class="c"># HSTS も CSP も nosniff もない</span>
+<span class="c"># server ヘッダーで版まで教えている</span></code></pre><div class="why">HTTP に落とされる、他サイトに埋め込まれる、XSS が成立したら何でも読み込まれる。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：nginx と Express（helmet）</div><pre class="code"><code><span class="lang">nginx.conf ／ Express</span><span class="c"># nginx</span>
+<span class="ok">add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;</span>
+<span class="ok">add_header X-Content-Type-Options nosniff always;</span>
+<span class="ok">add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'" always;</span>
+server_tokens off;
+
+<span class="c">// Express：helmet が主要ヘッダーをまとめて付ける</span>
+<span class="k">const</span> helmet = require(<span class="s">"helmet"</span>);
+<span class="ok">app.use(helmet());</span></code></pre><div class="why">helmet の既定値で HSTS・nosniff・frame-ancestors などが付く。CSP は自サイトの構成に合わせて調整する。</div></div>
+</div>
+<p>確認は <code>curl -I https://自分のサイト</code> で応答ヘッダーを見るだけです。ブラウザの開発者ツールの「ネットワーク」タブでも見られます。</p>
+
+<h3 id="waf">WAF・DDoS 対策・レート制限は「保険」</h3>
+<div class="svc"><img src="../assets/icons/defense/shield-half.svg" alt=""><div><div class="name">WAF<span class="yomi">Web Application Firewall</span></div><div class="one">リクエストの内容を規則で検査し、SQL インジェクションや XSS らしきものを遮断する。<b>すり抜けは必ずある</b>ので、コード側の対策（第3章）の代わりにはならない。パッチを当てるまでの時間稼ぎ（仮想パッチ）としては有効。</div></div></div>
+<div class="svc"><img src="../assets/icons/asset/globe.svg" alt=""><div><div class="name">CDN・DDoS 対策<span class="yomi">Content Delivery Network</span></div><div class="one">大量の通信を手前で受け止める。DDoS（IPA 10大脅威 2026 の9位）は自前のサーバーでは防げないので、CDN やクラウドの DDoS 対策サービスに任せる。</div></div></div>
+<div class="svc"><img src="../assets/icons/ops/gauge.svg" alt=""><div><div class="name">レート制限<span class="yomi">Rate Limiting</span></div><div class="one">同じ IP や利用者からの回数を制限する。ログイン・パスワードリセット・公開 API に必須（第4章 3.）。nginx の <code>limit_req</code>、Express の <code>express-rate-limit</code>、API ゲートウェイの機能などで実現する。</div></div></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <p style="margin:0">「WAF を入れたから SQL インジェクション対策は済み」は誤りです。WAF は既知のパターンにしか反応せず、迂回手法も多数あります。根本対策はプレースホルダ（第3章）、WAF は<b>二重目の保険</b>です。</p>
+</div>
+
+<h2 id="container">6. コンテナと実行環境</h2>
+<p>コンテナは「分離されているから安全」と思われがちですが、<b>root で動かす・秘密をイメージに焼く・古いベースイメージを使い続ける</b>と、コンテナの外まで被害が広がります。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な Dockerfile</div><pre class="code"><code><span class="lang">Dockerfile</span>FROM <span class="hl">node:latest</span>
+WORKDIR /app
+<span class="hl">COPY . .</span>                 <span class="c"># .env も .git も入る</span>
+<span class="hl">ENV API_KEY=sk-xxxxxxxx</span>  <span class="c"># イメージに永久に残る</span>
+RUN npm install
+CMD ["node", "server.js"]  <span class="c"># root で実行</span></code></pre><div class="why"><code>latest</code> は再現性がなく、<code>ENV</code>／<code>ARG</code> の秘密は <code>docker history</code> で読める。root で動くとコンテナ脱出時の被害が大きい。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な Dockerfile</div><pre class="code"><code><span class="lang">Dockerfile ／ .dockerignore</span>FROM <span class="ok">node:22-bookworm-slim</span>   <span class="c"># タグを固定、定期的に更新</span>
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY src ./src                 <span class="c"># 必要なものだけ</span>
+<span class="ok">USER node</span>                      <span class="c"># 公式イメージにある非 root ユーザー</span>
+CMD ["node", "src/server.js"]
+<span class="c"># 秘密は実行時に環境変数かシークレットで渡す</span>
+
+<span class="c"># .dockerignore</span>
+<span class="ok">.env
+.git
+node_modules</span></code></pre><div class="why">秘密はイメージに入らない。非 root で動く。入るファイルを限定する。</div></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>実行時の設定</th><th>Docker</th><th>Kubernetes（securityContext）</th></tr>
+  <tr><td>非 root で動かす</td><td>Dockerfile の <code>USER</code>、または <code>--user 1000</code></td><td><code>runAsNonRoot: true</code></td></tr>
+  <tr><td>ファイルシステムを読み取り専用に</td><td><code>--read-only</code>（書き込みが要る所は <code>--tmpfs /tmp</code>）</td><td><code>readOnlyRootFilesystem: true</code></td></tr>
+  <tr><td>不要な権限（<span class="term" data-tip="capability：Linux の root 権限を細かく分けたもの。コンテナには既定で一部が付いているが、多くのアプリには不要。">capability</span>）を落とす</td><td><code>--cap-drop=ALL</code></td><td><code>capabilities: { drop: ["ALL"] }</code></td></tr>
+  <tr><td>権限昇格を禁止</td><td><code>--security-opt=no-new-privileges</code></td><td><code>allowPrivilegeEscalation: false</code></td></tr>
+</table></div>
+<p>ベースイメージと OS パッケージの脆弱性は、<code>trivy image &lt;イメージ名&gt;</code> のようなスキャンで見つけられます（<a href="06-dependencies.html#container">第6章 8.</a>）。</p>
+
+<h2 id="ci">7. ローカルと CI の安全</h2>
+<p>CI はデプロイの権限を持つので、攻撃者から見れば「本番への近道」です。特に公開リポジトリでは、<b>フォークからの PR で送られてきたコードを、シークレット付きで実行してしまう</b>事故が起きます。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：権限が広く、Action の中身が固定されていない</div><pre class="code"><code><span class="lang">.github/workflows/ci.yml</span>on: <span class="hl">pull_request_target</span>   <span class="c"># 外部 PR でもシークレットが使える</span>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    <span class="c"># permissions の指定なし（既定はリポジトリ設定次第）</span>
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          <span class="hl">ref: ${{ github.event.pull_request.head.sha }}</span>
+      - uses: <span class="hl">someone/useful-action@v3</span>   <span class="c"># タグは後から差し替えられる</span>
+      - run: <span class="hl">echo "${{ secrets.DEPLOY_TOKEN }}" | base64</span></code></pre><div class="why">外部の人が PR に書いたコードが、本番用のトークン付きで動く。タグ <code>@v3</code> の中身が改ざんされても気づけない。変換して出力すると、ログのマスクが効かない。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：最小権限、SHA 固定、外部 PR にシークレットを渡さない</div><pre class="code"><code><span class="lang">.github/workflows/ci.yml</span>on: <span class="ok">pull_request</span>   <span class="c"># 外部 PR ではシークレットが渡らない</span>
+<span class="ok">permissions:
+  contents: read</span>   <span class="c"># 必要な権限だけ明示</span>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <span class="ok">actions/checkout@&lt;40桁のコミット SHA&gt;</span>  <span class="c"># v4 相当。SHA で固定</span>
+      - uses: <span class="ok">someone/useful-action@&lt;40桁のコミット SHA&gt;</span>
+      - run: npm ci &amp;&amp; npm test
+<span class="c"># デプロイは main への push だけで動く別ワークフローにし、</span>
+<span class="c"># クラウドの認証は長期キーでなく OIDC 連携で短期の認証情報を得る</span></code></pre><div class="why">テストとデプロイを分け、デプロイ側だけが権限を持つ。Action は SHA で固定し、Dependabot で更新する。</div></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>場所</th><th>やること</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/githubactions.svg" alt="">GitHub Actions</td><td><code>permissions:</code> を最小に。サードパーティ Action はコミット SHA で固定。<code>pull_request_target</code> で PR のコードをチェックアウトしない。シークレットを <code>echo</code>・変換・ファイル出力しない。リポジトリ設定で「フォークからの PR のワークフローは承認制」にする</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/laptop.svg" alt="">開発機</td><td><code>.env</code> は <code>.gitignore</code> に。<code>~/.aws/credentials</code> に長期キーを置かず、SSO（<code>aws sso login</code> など）で短期の認証情報を使う。OS とブラウザの自動更新、ディスク暗号化（BitLocker／FileVault）、画面ロック、パスワードマネージャー</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/github.svg" alt="">リポジトリ</td><td>ブランチ保護（main への直接 push 禁止、レビュー必須）、シークレットスキャンと Dependabot を有効化（第6章・第9章）</td></tr>
+</table></div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典</div>
+  <p style="margin:0">GitHub Docs「<a href="https://docs.github.com/ja/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions">GitHub Actions のセキュリティ強化</a>」、OWASP Cheat Sheet「<a href="https://cheatsheetseries.owasp.org/cheatsheets/CI_CD_Security_Cheat_Sheet.html">CI/CD Security</a>」。</p>
+</div>
+
+<h2 id="iac">8. 設定をコードにして差分を見る（IaC）</h2>
+<p>ここまでの設定を手作業（コンソールのクリック）でやると、「誰がいつ何を開けたか」が残らず、レビューもできません。<span class="term" data-tip="IaC（Infrastructure as Code）：サーバー・ネットワーク・権限などの設定を Terraform や CloudFormation などのコードで書き、Git で管理すること。">IaC</span> にすると、設定の変更が<b>PR の差分</b>になり、コードと同じようにレビューと自動検査に乗せられます（第2章ルール10）。</p>
+<div class="steps-grid">
+  <div class="step"><span class="k">STEP 1</span><b>コードにする</b><p>Terraform・CloudFormation・Pulumi などで、ネットワーク・権限・ストレージの設定を書く。手作業の変更を禁止する。</p></div>
+  <div class="step"><span class="k">STEP 2</span><b>差分をレビューする</b><p>PR で <code>0.0.0.0/0</code>・<code>"Action": "*"</code>・<code>acl = "public-read"</code> のような文字列を探す。「なぜ開けるか」をコメントに書かせる。</p></div>
+  <div class="step"><span class="k">STEP 3</span><b>自動検査を CI に入れる</b><p><code>checkov -d .</code>、<code>tfsec .</code>、<code>trivy config .</code> のような設定スキャンが、公開 DB や暗号化なしのストレージを PR の段階で止める。</p></div>
+  <div class="step"><span class="k">STEP 4</span><b>ドリフトを検知する</b><p>コードと実際の設定のずれ（<span class="term" data-tip="ドリフト：IaC のコードと、実際にクラウド上で動いている設定が食い違うこと。手作業の変更で起きる。">ドリフト</span>）を <code>terraform plan</code> の定期実行や、クラウドの設定監査（AWS Config、Security Hub、Security Command Center など）で見つける。</p></div>
+</div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：レビューで言う一言</div>
+  <ul style="margin:0">
+    <li>「この <code>0.0.0.0/0</code>、443 以外で必要な理由は何ですか？」</li>
+    <li>「この DB、アプリのセキュリティグループからだけにできますか？」</li>
+    <li>「このアクセスキー、ロールに置き換えられますか？」</li>
+    <li>「このバケット、パブリックアクセスブロックは ON ですか？ 公開が必要なら CDN 経由にできますか？」</li>
+    <li>「<code>curl -I</code> で HSTS と nosniff は出ますか？」</li>
+    <li>「この Dockerfile、<code>USER</code> はありますか？ <code>.env</code> は <code>.dockerignore</code> に入っていますか？」</li>
+    <li>「この Action、SHA で固定できますか？ <code>permissions</code> は書いてありますか？」</li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>ポート</dt><dd>通信の窓口の番号。443 は HTTPS、22 は SSH、5432 は PostgreSQL。開いているポートは攻撃の入口になりうる。</dd>
+    <dt>セキュリティグループ</dt><dd>クラウドの仮想ファイアウォール。どこから（IP かグループ）どのポートへの通信を許可するかを決める。</dd>
+    <dt>踏み台サーバー</dt><dd>外から直接 SSH させず、いったん経由させる専用サーバー。SSM Session Manager や IAP のような「踏み台不要」のサービスで置き換えられる。</dd>
+    <dt>CORS</dt><dd>別のオリジンの Web ページから API を呼ぶことをブラウザに許可する仕組み。許可元は列挙する。</dd>
+    <dt>CDN</dt><dd>利用者に近い場所から配信するネットワーク。大量の通信を手前で受け止めるので DDoS 対策にもなる。</dd>
+    <dt>OIDC 連携</dt><dd>CI がクラウドに対して「私はこのリポジトリのこのワークフローです」と証明し、長期キーなしで短期の認証情報を得る仕組み。</dd>
+    <dt>仮想パッチ</dt><dd>コードを直す前に、WAF の規則で該当の攻撃パターンだけを遮断して時間を稼ぐこと。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>設定ミスの典型例を5つ挙げてください。</summary><div class="a">DB をインターネットに公開、ストレージを全員に公開、デバッグモードのまま本番、初期パスワードのまま、管理画面・サンプルの放置（ほかに CORS の <code>*</code>、詳細なエラー表示）。</div></details>
+  <details class="q"><summary>インターネットに開けてよいポートと、DB・SSH の許可元は？</summary><div class="a">開けるのは 443（と転送用の 80）だけ。DB はアプリのセキュリティグループからだけ。SSH は外から直接開けず、踏み台か SSM／IAP 経由。</div></details>
+  <details class="q"><summary>「DB にパスワードがあるからインターネットに公開しても大丈夫」はなぜ誤りですか。</summary><div class="a">総当たりと DB 自体の脆弱性が直接狙われる。認証がない既定設定の DB もある。非公開ネットワークに置くのが正解。</div></details>
+  <details class="q"><summary>SSH の設定で変える3つは？</summary><div class="a"><code>PermitRootLogin no</code>、<code>PasswordAuthentication no</code>、<code>PubkeyAuthentication yes</code>。さらに外から直接開けない。</div></details>
+  <details class="q"><summary>サーバーからクラウド API を呼ぶとき、アクセスキーを置く代わりにどうしますか。</summary><div class="a">実行環境にロール（インスタンスロール・タスクロール・サービスアカウント）を付ける。鍵は自動で発行・更新される。</div></details>
+  <details class="q"><summary>S3 のパブリックアクセスブロックの4つの設定は？どの範囲で ON にしますか。</summary><div class="a">BlockPublicAcls、IgnorePublicAcls、BlockPublicPolicy、RestrictPublicBuckets。アカウント全体で ON にする。</div></details>
+  <details class="q"><summary>利用者に一時的にファイルを渡すとき、バケットを公開せずにどうしますか。</summary><div class="a">認可を確認したうえで、有効期限付きの署名付き URL を発行する（数分〜1時間）。</div></details>
+  <details class="q"><summary>付けるべきセキュリティヘッダーを5つ以上挙げてください。確認コマンドは？</summary><div class="a">Strict-Transport-Security、Content-Security-Policy（frame-ancestors を含む）、X-Content-Type-Options: nosniff、Referrer-Policy、Permissions-Policy、機密ページの Cache-Control: no-store。確認は <code>curl -I</code>。</div></details>
+  <details class="q"><summary>WAF は SQL インジェクション対策の代わりになりますか。</summary><div class="a">ならない。既知のパターンにしか反応せず迂回もある。根本対策はプレースホルダで、WAF は保険（仮想パッチ）。</div></details>
+  <details class="q"><summary>Dockerfile で守る3点は？</summary><div class="a">タグを固定したベースイメージを定期更新する／<code>USER</code> で非 root にする／秘密を <code>ENV</code>・<code>ARG</code> に書かず、<code>.dockerignore</code> で <code>.env</code> と <code>.git</code> を除外する。</div></details>
+  <details class="q"><summary>GitHub Actions で守る3点は？</summary><div class="a"><code>permissions:</code> を最小に明示／サードパーティ Action はコミット SHA で固定／<code>pull_request_target</code> で外部 PR のコードを実行しない（シークレットを渡さない）。</div></details>
+  <details class="q"><summary>IaC にすると何ができるようになりますか。ドリフトとは？</summary><div class="a">設定変更が PR の差分になり、レビューと自動検査（Checkov・tfsec・Trivy）に乗せられる。ドリフトはコードと実際の設定のずれで、手作業の変更で起きる。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+</body>
+</html>

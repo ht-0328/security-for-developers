@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学び方 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../" data-page="method">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 学び方</div>
+<h1>学び方：何から、どう学ぶか<br><small style="font-size:.6em;color:var(--ink-3)">実務で使えるようになるまでの道順と、本サイトの使い方</small></h1>
+<p class="lead">セキュリティは範囲が広く、「全部」を学ぼうとすると最初の一歩で止まります。開発者に必要なのは、自分が作るものに入り込む穴の種類を知り、穴を作らない書き方を体で覚え、部品と設定を最新に保ち、何かあったとき動けることです。このページでは、その順番と教材、本サイトの使い方を説明します。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>このページで理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>「実務で使える」とは3つのこと</b>：レビューで気づける・設計で先回りできる・ニュースの影響を判断できる
+      <ul>
+        <li>気づける：文字列をつないだ SQL、ID を変えれば他人のデータが見える API を、レビューで指摘できる</li>
+        <li>先回りできる：設計のときに「誰が・何に・何をしてよいか」「悪用されたらどうなるか」を1回考えられる</li>
+        <li>判断できる：「〇〇に脆弱性」のニュースを見て、自分のシステムが影響を受けるか、今日直すかを決められる</li>
+        <li>攻撃ツールの操作や暗号理論は、開発者の仕事には要らない</li>
+      </ul>
+    </li>
+    <li><b>開発者の守備範囲は4つ</b>：コード・部品・設定・運用
+      <ul>
+        <li>コード：自分が書く処理の穴（第3〜5章）</li>
+        <li>部品：使っているライブラリ・フレームワーク・OS の穴（第6章）</li>
+        <li>設定：公開範囲・権限・初期設定のミス（第7章）</li>
+        <li>運用：ログ・監視・更新・事故対応（第8章）</li>
+        <li>人を狙う攻撃（フィッシングなど）は組織全体の課題。開発者は「人が間違えても被害が広がらない作り」で貢献する</li>
+      </ul>
+    </li>
+    <li><b>学ぶ順番は6段階</b>：地図 → 10のルール → 手を動かして体験 → 部品と設定 → 開発の流れに組み込む → 続ける
+      <ol>
+        <li>地図（第1章）：守るもの・言葉の関係・ニュースの読み方。半日</li>
+        <li>10のルール（第2章）とチェックリスト：明日からの行動。1日</li>
+        <li>体験（第3〜5章＋練習教材）：Web の穴を自分で突いて、自分でふさぐ。2〜4週間</li>
+        <li>部品と設定（第6〜8章）：依存スキャンを自分の CI に入れる。1〜2週間</li>
+        <li>開発の流れ（第9章）：PR テンプレートにチェック項目を入れる。1週間</li>
+        <li>続ける：脆弱性情報を受け取り、年1回 IPA 10大脅威と OWASP Top 10 を読み直す</li>
+      </ol>
+    </li>
+    <li><b>教材は「日本語・無料・手を動かせる」を優先する</b>
+      <ul>
+        <li>日本語の正解集：IPA「安全なウェブサイトの作り方」（無料 PDF）</li>
+        <li>手を動かす：PortSwigger Web Security Academy（無料・英語・ブラウザだけ）、OWASP Juice Shop</li>
+        <li>体系的な1冊：徳丸本（『体系的に学ぶ 安全なWebアプリケーションの作り方』）</li>
+        <li>実装の正解集：OWASP Cheat Sheet Series</li>
+      </ul>
+    </li>
+    <li><b>練習は自分のものか、練習用に用意された環境だけ</b>：他人のシステムに試すのは犯罪（不正アクセス禁止法）</li>
+    <li><b>本サイトは「読んだら閉じて思い出す」で使う</b>：章末の想起練習 → 学習記録 → 1日後・3日後・7日後に復習</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>このページの全体像</div>
+  <ol style="margin:0">
+    <li>「実務で使える」とは何か：3つのできること</li>
+    <li>開発者の守備範囲：コード・部品・設定・運用</li>
+    <li>学ぶ順番（ロードマップ）</li>
+    <li>教材の選び方と一覧</li>
+    <li>やってはいけない学び方</li>
+    <li>本サイトの使い方：読む・閉じる・思い出す</li>
+    <li>1週間の進め方の例</li>
+  </ol>
+</div>
+
+<h2 id="goal">1. 「実務で使える」とは何か：3つのできること</h2>
+<p>セキュリティの専門家になる必要はありません。開発者として「使える」状態は、次の3つができることです。学び始める前に、この3つを到達点として置いてください。</p>
+<div class="steps-grid">
+  <div class="step"><span class="k">できること 1</span><b>レビューで気づける</b><p>文字列をつないで作った SQL、画面側だけの入力チェック、URL の ID を変えれば他人のデータが見える API。こうした「よくある穴」を、コードを見た瞬間に指摘できる。</p></div>
+  <div class="step"><span class="k">できること 2</span><b>設計で先回りできる</b><p>新しい機能を作るとき、「誰が・何に・何をしてよいか」「この機能が悪用されたら何が起きるか」を1回考え、設計に書き残せる。</p></div>
+  <div class="step"><span class="k">できること 3</span><b>ニュースの影響を判断できる</b><p>「〇〇に深刻な脆弱性」の記事を見て、自分のシステムがその部品を使っているか、外から届くか、今日直すべきかを判断できる。</p></div>
+</div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>家を建てる大工に置き換えると、必要なのは「泥棒の手口を全部知ること」ではなく、<b>鍵のかかる窓を選び、鍵をかけ忘れない設計にし、欠陥が見つかった建材を交換できること</b>です。防犯の専門家（警備会社）とは役割が違います。</p>
+</div>
+
+<h2 id="scope">2. 開発者の守備範囲：コード・部品・設定・運用</h2>
+<p>セキュリティの話題は広く見えますが、開発者が日々さわる範囲は4つに整理できます。本サイトの章立てもこの4つに沿っています。</p>
+<div class="diagram">
+  <div class="dtitle">開発者が守る4つの範囲と、対応する章</div>
+  <div class="flow wrap-ok">
+    <div class="node"><img src="../assets/icons/asset/code.svg" alt="">コード<small>第3〜5章</small></div>
+    <div class="node"><img src="../assets/icons/asset/package.svg" alt="">部品<small>第6章</small></div>
+    <div class="node"><img src="../assets/icons/asset/server.svg" alt="">設定<small>第7章</small></div>
+    <div class="node"><img src="../assets/icons/ops/activity.svg" alt="">運用<small>第8章</small></div>
+  </div>
+  <div class="flow"><div class="arr">↓<small>流れに組み込む</small></div></div>
+  <div class="flow wrap-ok">
+    <div class="node lg"><img src="../assets/icons/ops/workflow.svg" alt="">開発プロセス<small>第9章</small></div>
+  </div>
+  <div class="cap">人を狙う攻撃（フィッシング・パスワードの使い回し）は組織全体の課題です。開発者は「人が間違えても被害が広がらない作り」（多要素認証、最小権限）で貢献します。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>範囲</th><th>開発者がやること</th><th>専門家・他部門に任せること</th></tr>
+  <tr><td><b>コード</b></td><td>入力の検証、安全な API の使い方、認証・認可の実装</td><td>専門家による脆弱性診断（第三者の目）</td></tr>
+  <tr><td><b>部品</b></td><td>依存ライブラリの更新・スキャン、EoL の回避</td><td>脆弱性情報の分析・公表（IPA・JPCERT/CC・各ベンダー）</td></tr>
+  <tr><td><b>設定</b></td><td>公開範囲・権限・初期設定の確認、設定のコード化</td><td>ネットワーク機器・物理設備の管理</td></tr>
+  <tr><td><b>運用</b></td><td>ログの設計、更新、初動の手順を知っておく</td><td>監視センター（SOC）、法務・広報対応、警察・監督官庁への届け出</td></tr>
+</table></div>
+
+<h2 id="roadmap">3. 学ぶ順番（ロードマップ）</h2>
+<p>順番が大切です。攻撃手法の暗記から入ると、知識が増えても自分のコードにどう効くかが見えません。<b>地図 → 行動のルール → 手を動かして体験 → 自分のプロジェクトに適用 → 続ける</b>の順で進めます。</p>
+<div class="steps-grid">
+  <div class="step"><span class="k">STEP 1 ／ 半日</span><b>地図を持つ（第1章）</b><p>守るもの3つ、脆弱性・脅威・リスクの関係、CVE・CVSS などニュースの用語。「わからない言葉がない」状態にする。</p></div>
+  <div class="step"><span class="k">STEP 2 ／ 1日</span><b>10のルールとチェックリスト（第2章）</b><p>明日からの行動を決める。自分の今のプロジェクトにチェックリストを当て、×が付いた項目を書き出す。</p></div>
+  <div class="step"><span class="k">STEP 3 ／ 2〜4週間</span><b>Web の穴を体験する（第3〜5章）</b><p>本文の危険なコードと安全なコードを読み、練習教材で実際に攻撃が成立する様子と、直せば止まる様子を自分の手で確かめる。</p></div>
+  <div class="step"><span class="k">STEP 4 ／ 1〜2週間</span><b>部品・設定・運用（第6〜8章）</b><p>自分のリポジトリに依存スキャンと自動更新を入れる。セキュリティヘッダーと公開範囲を確認する。事故の初動手順を1枚にする。</p></div>
+  <div class="step"><span class="k">STEP 5 ／ 1週間</span><b>開発の流れに組み込む（第9章）</b><p>PR テンプレートにチェック項目を入れ、CI に自動検査を足す。設計レビューに「悪用されたら」の1問を加える。</p></div>
+  <div class="step"><span class="k">STEP 6 ／ ずっと</span><b>続ける</b><p>使っている部品の脆弱性情報を受け取る。毎年1月の IPA 10大脅威と、改訂時の OWASP Top 10 を読み直す。</p></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>段階</th><th>ゴール（できるようになること）</th><th>本サイト</th><th>外部の教材</th></tr>
+  <tr><td>1 地図</td><td>ニュースの用語が全部わかる。自分への影響を3問で判断できる</td><td>第1章</td><td>IPA 10大脅威、OWASP Top 10:2025（日本語）</td></tr>
+  <tr><td>2 ルール</td><td>10のルールを言える。自分のプロジェクトの×を書き出せる</td><td>第2章、チェックリスト</td><td>—</td></tr>
+  <tr><td>3 体験</td><td>SQL インジェクション・XSS・CSRF・認可の不備を、自分で起こして自分で直せる</td><td>第3〜5章</td><td>IPA「安全なウェブサイトの作り方」、徳丸本、PortSwigger Web Security Academy、OWASP Juice Shop</td></tr>
+  <tr><td>4 部品・設定・運用</td><td>依存スキャンと自動更新が自分の CI で動く。初動手順が書けている</td><td>第6〜8章</td><td>GitHub の Dependabot、OWASP Cheat Sheet Series</td></tr>
+  <tr><td>5 流れ</td><td>PR テンプレートと CI に検査が入り、設計レビューで脅威を1回考える</td><td>第9章</td><td>OWASP Cheat Sheet Series、各 SAST ツールの入門</td></tr>
+  <tr><td>6 続ける</td><td>脆弱性情報が届く。年1回見直す</td><td>第8章 6.</td><td>JVN、GitHub Security Advisories</td></tr>
+</table></div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>任意：資格は「地図」として使う</div>
+  <p>資格は目的ではありませんが、試験範囲は体系の地図として便利です。日本語で開発者に最も合うのは IPA の<b>情報処理安全確保支援士試験</b>（出題範囲を眺めるだけでも、自分の知らない領域がわかります）。クラウド中心なら各クラウドのセキュリティ系認定が、設定の正解を学ぶ近道になります。本サイトは特定の試験対策ではありません。</p>
+</div>
+
+<h2 id="materials">4. 教材の選び方と一覧</h2>
+<p>選ぶ基準は3つです。<b>日本語で読めるか</b>（用語の壁を減らす）、<b>無料か</b>（まず始められる）、<b>手を動かせるか</b>（読むだけでは身につかない）。この3つを多く満たすものから使います。</p>
+<div class="table-wrap"><table>
+  <tr><th>教材</th><th>何が得られるか</th><th>言語・費用</th><th>向く段階</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/book-open.svg" alt=""><b>本サイト</b></td><td>用語・全体像・10のルール・各脆弱性の原理と対策・学ぶ順番</td><td>日本語・無料</td><td>1〜5</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/scroll-text.svg" alt=""><b>IPA「安全なウェブサイトの作り方」</b><br><small class="muted">改訂第7版（PDF）</small></td><td>Web の代表的な脆弱性ごとの「根本的解決」と「保険的対策」。日本の公的機関の正解集。<a href="https://www.ipa.go.jp/security/vuln/websecurity.html">公式ページ</a></td><td>日本語・無料</td><td>3</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/newspaper.svg" alt=""><b>IPA「情報セキュリティ10大脅威」</b></td><td>その年に何が多かったか。毎年1月に発表。<a href="https://www.ipa.go.jp/security/10threats/">公式ページ</a></td><td>日本語・無料</td><td>1、6</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/owasp.svg" alt=""><b>OWASP Top 10:2025</b></td><td>Web アプリの穴の10分類。<a href="https://top10.owasp.org/2025/ja/">日本語版</a>あり</td><td>日本語・無料</td><td>1、3</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/owasp.svg" alt=""><b>OWASP Cheat Sheet Series</b></td><td>「パスワード保存」「セッション管理」など話題ごとの実装の正解。<a href="https://cheatsheetseries.owasp.org/">公式</a></td><td>英語・無料</td><td>3〜5</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/library.svg" alt=""><b>徳丸本</b><br><small class="muted">『体系的に学ぶ 安全なWebアプリケーションの作り方 第2版』（SBクリエイティブ）</small></td><td>Web の脆弱性を原理から体系的に。実習環境付き。日本語で1冊選ぶならこれ。第3版の改訂が予告されているので、買う前に最新版を確認</td><td>日本語・有料</td><td>3</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/burpsuite.svg" alt=""><b>PortSwigger Web Security Academy</b></td><td>ブラウザだけで攻撃を体験できる190以上の練習問題（ラボ）。登録が必要。<a href="https://portswigger.net/web-security">公式</a></td><td>英語・無料</td><td>3</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/owasp.svg" alt=""><b>OWASP Juice Shop</b></td><td>わざと穴だらけに作られた EC サイト。自分で立てて攻撃と修正を試す。<a href="https://owasp.org/www-project-juice-shop/">公式</a></td><td>英語・無料</td><td>3</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/book-marked.svg" alt=""><b>MDN「Web セキュリティ」</b></td><td>CSP・Cookie・CORS など、ブラウザ側の仕組みの正確な説明。<a href="https://developer.mozilla.org/ja/docs/Web/Security">日本語版</a></td><td>日本語・無料</td><td>3〜4</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/bell-ring.svg" alt=""><b>JVN、GitHub Security Advisories</b></td><td>脆弱性情報そのもの。JVN は日本語。GitHub はリポジトリの依存関係に合わせて通知（Dependabot）</td><td>日本語／英語・無料</td><td>6</td></tr>
+</table></div>
+
+<h2 id="dont">5. やってはいけない学び方</h2>
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>他人のシステムで試さない</div>
+  <p>本サイトで学ぶ攻撃の仕組みを、<b>自分の管理下にないサイトやサービスに対して試すこと</b>は、不正アクセス禁止法などに触れる犯罪です。「ID を変えてみただけ」「診断のつもりだった」は通りません。練習は、自分で立てた環境（Juice Shop など）か、練習用として公開されている教材（Web Security Academy のラボ）だけで行ってください。勤務先のシステムであっても、許可なく診断してはいけません。</p>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>陥りやすい学び方</th><th>なぜ効かないか</th><th>代わりに</th></tr>
+  <tr><td>攻撃手法の名前を片っ端から覚える</td><td>自分のコードのどこに効くかが見えず、使えない知識になる</td><td>「何が起きる → なぜ → どう防ぐ → どう確かめる」の順で、1つずつ自分のコードに当てる</td></tr>
+  <tr><td>ツールを入れて安心する</td><td>ツールは「よくある穴」の一部しか見つけない。認可の不備はほぼ見つけられない</td><td>ツールは第9章の位置づけで使い、認可・設計は人が見る</td></tr>
+  <tr><td>暗号理論から入る</td><td>開発者が暗号を自作することはない。使い方の正解を知れば足りる</td><td>第5章の「ライブラリと推奨アルゴリズム」だけ押さえる</td></tr>
+  <tr><td>一度読んで終わりにする</td><td>読んだ直後は分かった気になるが、1週間後のレビューで思い出せない</td><td>章末の想起練習と復習カードで、間隔をあけて思い出す</td></tr>
+</table></div>
+
+<h2 id="howto">6. 本サイトの使い方：読む・閉じる・思い出す</h2>
+<p>本サイトは、認知心理学で効果が確認されている「想起練習」と「間隔反復」に沿って作っています。要るのは「見れば分かる」ではなく「レビューの場で思い出せる」ことです。</p>
+<h3>読む前・読むとき・読んだ後</h3>
+<div class="steps-grid">
+  <div class="step"><span class="k">読む前</span><b>到達点を見る</b><p>章の冒頭「この章で理解してほしいこと」「全体像」「読む前の問い」を見て、答えを予想してから読む。</p></div>
+  <div class="step"><span class="k">読むとき</span><b>自分のコードに当てる</b><p>危険な例を見たら「自分のリポジトリに似た書き方はないか」を考える。あれば場所をメモする。</p></div>
+  <div class="step"><span class="k">読んだ直後</span><b>閉じて言う</b><p>画面を閉じ、「この章は一言でいうと何の話か」「主な項目は何か」を自分の言葉で言う。言えなかった箇所だけ見直す。</p></div>
+  <div class="step"><span class="k">翌日以降</span><b>想起練習と学習記録</b><p>章末の想起練習を本文を見ずに行い、「学習記録」に記録する。1日後 → 3日後 → 7日後 → 14日後 → 30日後に復習日が表示される。</p></div>
+</div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>根拠：テスト効果と分散学習</div>
+  <p>記憶から取り出す行為そのものが記憶を強くすること（テスト効果）、同じ時間なら日を分けて復習するほうが長く残ること（分散学習）は、多数の研究で確認されています。本サイトの想起練習・復習カード・学習記録はこの2つを実装したものです。</p>
+</div>
+<h3>各ページに出てくる箱の意味</h3>
+<div class="box goal"><div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>章の結論。何が危ないか・何をすればよいかを最初にまとめています。読み終えたら、本文を見ずに説明できるか確かめます。</div>
+<div class="box map"><div class="box-title"><span class="em">🗺️</span>この章の全体像</div>章の構成と、読む前に考える問い。答えを予想してから読み進めます。</div>
+<div class="box kotoba"><div class="box-title"><span class="em">📝</span>用語の補足</div>本文中の専門用語の定義。本文の<span class="term" data-tip="このように点線の付いた用語は、タップ（PC ではマウスオーバー）すると意味が表示されます。">点線の付いた用語</span>もタップで意味が出ます。</div>
+<div class="box story"><div class="box-title"><span class="em">💡</span>イメージで理解する</div>仕組みを身近な構造（家・鍵・郵便）に置き換えた説明。</div>
+<div class="box hook"><div class="box-title"><span class="em">🔑</span>覚え方</div>分類や合言葉など、記憶の手がかり。</div>
+<div class="box exam"><div class="box-title"><span class="em">🛠️</span>実務ではこうする</div>レビュー・設計・運用の場面で、具体的に何を言い、何をするか。</div>
+<div class="box warn"><div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>誤解されやすい考え方や、「対策したつもり」になる書き方。</div>
+<div class="box news"><div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>その脆弱性が報道でどう表現されるか。記事と本文の言葉をつなぎます。</div>
+<div class="box science"><div class="box-title"><span class="em">🔬</span>根拠・出典</div>公的機関や標準の文書など、本文の根拠。</div>
+<div class="box law"><div class="box-title"><span class="em">⚖️</span>法律・やってはいけないこと</div>法律に触れる行為や、報告の義務に関わること。</div>
+<div class="compare" style="margin-top:1em">
+  <div class="ng"><div class="lbl">✗ 危険な例</div><pre class="code"><code><span class="c"># 左が危険なコード。危ない箇所に色が付く</span></code></pre></div>
+  <div class="ok"><div class="lbl">✓ 安全な例</div><pre class="code"><code><span class="c"># 右が直したコード。直した箇所に色が付く</span></code></pre></div>
+</div>
+
+<h2 id="week">7. 1週間の進め方の例</h2>
+<p>1日 30〜60 分を想定しています。新しい章を読む日と、復習だけの日を分けるのがコツです。</p>
+<div class="table-wrap"><table>
+  <tr><th>曜日</th><th>新しく読む</th><th>復習・手を動かす</th></tr>
+  <tr><td>月</td><td>学び方 → 第1章</td><td>第1章の想起練習、学習記録</td></tr>
+  <tr><td>火</td><td>第2章</td><td>チェックリストを自分のプロジェクトに当て、×を書き出す</td></tr>
+  <tr><td>水</td><td>第3章（前半：SQL・コマンド）</td><td>第1章の1日後の復習。自分のリポジトリで SQL の組み立て方を検索する</td></tr>
+  <tr><td>木</td><td>第3章（後半：XSS・検証）</td><td>第2章の復習。練習教材で SQL インジェクションのラボを1つ</td></tr>
+  <tr><td>金</td><td>第4章</td><td>第3章の復習。練習教材で XSS のラボを1つ</td></tr>
+  <tr><td>土</td><td>—</td><td>復習カード（本日の復習分）。第1章の3日後の復習</td></tr>
+  <tr><td>日</td><td>第5章</td><td>自分のリポジトリに秘密情報が入っていないか確認する（第5章 6.）</td></tr>
+</table></div>
+<p>2週目以降は第6〜9章を同じ要領で進め、各章の「実務ではこうする」を1つずつ自分のプロジェクトに適用します。</p>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>開発者にとって「実務で使える」とは、どの3つができることですか。</summary><div class="a">レビューでよくある穴に気づける／設計で「誰が何をしてよいか」「悪用されたら」を先回りして考えられる／脆弱性のニュースを見て自分への影響と対応の緊急度を判断できる。</div></details>
+  <details class="q"><summary>開発者の守備範囲4つと、それぞれ対応する章を挙げてください。</summary><div class="a">コード（第3〜5章）、部品（第6章）、設定（第7章）、運用（第8章）。第9章でこれらを開発の流れに組み込む。</div></details>
+  <details class="q"><summary>学ぶ順番の6段階を順に言ってください。</summary><div class="a">地図（第1章）→ 10のルールとチェックリスト（第2章）→ 手を動かして体験（第3〜5章＋練習教材）→ 部品・設定・運用（第6〜8章）→ 開発の流れに組み込む（第9章）→ 続ける（脆弱性情報の購読、年1回の見直し）。</div></details>
+  <details class="q"><summary>日本語・無料で読める Web の脆弱性対策の正解集は何ですか。手を動かして攻撃を体験できる無料教材を2つ挙げてください。</summary><div class="a">IPA「安全なウェブサイトの作り方」。体験は PortSwigger Web Security Academy と OWASP Juice Shop。</div></details>
+  <details class="q"><summary>学んだ攻撃手法を練習してよい対象はどこですか。</summary><div class="a">自分で立てた環境と、練習用に公開された教材だけ。他人のシステム（勤務先のシステムも許可がなければ同じ）に試すのは不正アクセス禁止法などに触れる犯罪。</div></details>
+  <details class="q"><summary>本サイトの各章を読んだ直後にすることは何ですか。</summary><div class="a">画面を閉じ、「この章は一言で何の話か」「主な項目は何か」を自分の言葉で言う。言えなかった箇所だけ見直し、想起練習をしてから学習記録に記録する。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+</body>
+</html>

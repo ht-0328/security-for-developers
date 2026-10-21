@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運用：ログ・監視・バックアップ・インシデント対応 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../" data-page="ch08">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第8章</div>
+<p><span class="badge ops">運用</span></p>
+<h1>第8章 運用：ログ・監視・バックアップ・インシデント対応</h1>
+<p class="lead">作って終わりではありません。攻撃は運用中に来ます。予防をどれだけ固めても穴はゼロにならないので、<b>起きたことに気づく（ログ・監視）</b>、<b>壊れても戻せる（バックアップ）</b>、<b>起きたときに迷わず動ける（手順）</b>の3つを用意しておきます。この章は、個人開発でも小さなチームでも、そのまま使える最低限の形を示します。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>運用の仕事は検知・回復・対応の3つ</b>：予防だけでは足りない（OWASP Top 10:2025 A09「セキュリティログとアラートの不備」）
+      <ul>
+        <li>検知：ログを残し、兆候にアラートを付ける。回復：バックアップから戻せる。対応：手順書どおりに動く</li>
+      </ul>
+    </li>
+    <li><b>ログに残すもの・残さないもの</b>
+      <ul>
+        <li>残す：認証の成功・失敗、権限の変更、重要データの参照・変更・削除・エクスポート、管理操作、入力検証エラー、例外。「誰が・いつ・何に・何を・結果」の形で</li>
+        <li>残さない：パスワード、トークン・セッション ID、カード番号、個人情報の本体。出力前にマスクする</li>
+        <li>形式：構造化（JSON）、時刻は UTC かタイムゾーン明記、リクエストを追う相関 ID</li>
+        <li>保管：1か所に集め、追記のみ・別の権限で守る（侵入者はログを消しに来る）。保管期間は規程で決める</li>
+      </ul>
+    </li>
+    <li><b>監視の兆候は7つ</b>：ログイン失敗の急増、深夜の管理操作、権限の変更、大量エクスポート、外向きの異常通信、CPU の急騰、新しい管理者アカウント
+      <ul>
+        <li>アラートは少数の確実な条件から始める。鳴りすぎると見なくなる（アラート疲れ）</li>
+      </ul>
+    </li>
+    <li><b>バックアップは 3-2-1、書き換え不可、復元テスト</b>：ランサム攻撃は IPA 10大脅威 2026 の1位
+      <ul>
+        <li>3つの複製、2種類の媒体、1つは別の場所。1つは書き換え不可（イミュータブル）かオフライン</li>
+        <li>ランサムウェアはバックアップから消しに来る。本番とは別の権限・別アカウントで守る</li>
+        <li>取っているだけでは意味がない。戻せることを定期的に試す。RPO（失ってよい期間）と RTO（戻すまでの時間）を決める</li>
+      </ul>
+    </li>
+    <li><b>インシデント対応は6段階</b>：検知 → 初動 → 封じ込め → 根絶 → 復旧 → 振り返り
+      <ul>
+        <li>初動は「記録・連絡・証拠保全」。慌てて消さない、再起動しない</li>
+        <li>封じ込めは認証情報のローテーションと該当サーバーの隔離。連絡先と手順を1枚にして全員が場所を知る</li>
+        <li>困ったら JPCERT/CC に相談できる</li>
+      </ul>
+    </li>
+    <li><b>脆弱性情報は受け取る仕組みを作り、3問で仕分けする</b>
+      <ul>
+        <li>情報源：GitHub の Dependabot alerts、JVN、IPA、使っている製品のセキュリティアドバイザリ</li>
+        <li>手順：影響判断（使っているか・届くか・直したか）→ 一時対策 → パッチ → 確認 → 記録</li>
+        <li>期限の例：Critical は当日、High は1週間以内、Medium は次の定期リリース</li>
+      </ul>
+    </li>
+    <li><b>個人情報が漏えいしたら法律上の報告義務がある</b>：個人情報保護委員会への報告と本人への通知。速報はおおむね3〜5日以内、確報は30日以内（不正目的なら60日以内）。詳細は法務・専門家へ</li>
+    <li><b>権限の棚卸しは定期作業</b>：退職・異動の当日にアカウント削除、不要な API キーの削除、共有アカウントの廃止、鍵のローテーション、年1回の見直し</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>運用で守ること：検知・回復・対応</li>
+    <li>ログ：何を残し、何を残さないか</li>
+    <li>監視とアラート：異常の兆候</li>
+    <li>バックアップとランサムウェア</li>
+    <li>インシデント対応の手順</li>
+    <li>脆弱性情報の追い方と対応手順</li>
+    <li>個人情報漏えい時の報告義務</li>
+    <li>権限の棚卸し</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>デバッグのため、リクエストボディをそのままログに出している。何が問題か。</li>
+    <li>毎晩バックアップを同じサーバーの別フォルダに取っている。ランサムウェアに効くか。</li>
+    <li>不審なログインを見つけた。最初にサーバーを再起動してよいか。</li>
+  </ul>
+</div>
+
+<h2 id="overview">1. 運用で守ること：検知・回復・対応</h2>
+<p>第1章で、対策には<b>予防・検知・回復</b>の3種類があると整理しました。第3〜7章はほぼ予防の話です。この章は残りの2つと、実際に起きたときの「対応」を扱います。</p>
+<div class="diagram">
+  <div class="dtitle">予防をすり抜けた攻撃に、検知と回復で備える</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/defense/shield.svg" alt="">予防<small>第3〜7章</small></div>
+    <div class="arr">→<small>すり抜け</small></div>
+    <div class="node"><img src="../assets/icons/defense/radar.svg" alt="">検知<small>ログ・監視（2〜3節）</small></div>
+    <div class="arr">→<small>気づいたら</small></div>
+    <div class="node"><img src="../assets/icons/defense/siren.svg" alt="">対応<small>手順書（5〜7節）</small></div>
+    <div class="arr">→<small>戻す</small></div>
+    <div class="node"><img src="../assets/icons/ops/archive-restore.svg" alt="">回復<small>バックアップ（4節）</small></div>
+  </div>
+  <div class="cap">OWASP Top 10:2025 の A09「セキュリティログとアラートの不備」は、攻撃されても気づけない状態そのものを脆弱性として数えています。</div>
+</div>
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>家の防犯で言えば、鍵（予防）に加えて、<b>防犯カメラと通知</b>（検知）、<b>火災保険と貴重品の別保管</b>（回復）、<b>避難経路と緊急連絡先の紙</b>（対応）です。鍵だけ頑丈にしても、入られたことに1か月気づかなければ被害は広がります。</p>
+</div>
+
+<h2 id="logging">2. ログ：何を残し、何を残さないか</h2>
+<p>ログは「後から何が起きたかを再現する」唯一の材料です。しかし、何でも出せばよいわけではありません。<b>ログに秘密を書くと、ログ基盤が第2の漏えい元になります</b>。</p>
+<div class="table-wrap"><table>
+  <tr><th>残す（誰が・いつ・何に・何を・結果）</th><th>残さない（出力前にマスク）</th></tr>
+  <tr><td>ログインの成功・失敗（利用者 ID、送信元 IP、結果）</td><td>パスワード（失敗時の入力値も）</td></tr>
+  <tr><td>権限・ロールの変更、管理者アカウントの作成</td><td>セッション ID、API トークン、<code>Authorization</code> ヘッダー、Cookie</td></tr>
+  <tr><td>重要データの参照・変更・削除・エクスポート</td><td>クレジットカード番号、口座番号</td></tr>
+  <tr><td>管理画面の操作、設定変更、デプロイ</td><td>個人情報の本体（氏名・住所・メール本文）。ID で参照できれば十分</td></tr>
+  <tr><td>入力検証のエラー（攻撃の試行の兆候）、例外・スタックトレース（ログにだけ）</td><td>リクエストボディ・レスポンスボディの丸ごと</td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：リクエストを丸ごと出す</div><pre class="code"><code><span class="lang">Python（Flask）</span>@app.post(<span class="s">"/login"</span>)
+<span class="k">def</span> login():
+    body = request.get_json()
+    <span class="hl">app.logger.info(f"login request: {body}")</span>
+    <span class="c"># → {"email": "...", "password": "hunter2"} がログに残る</span>
+    ...</code></pre><div class="why">パスワードがログ基盤・バックアップ・監視ツールの画面に残り、閲覧できる人全員に見える。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：項目を選び、秘密はマスクする</div><pre class="code"><code><span class="lang">Python（Flask）</span><span class="k">import</span> logging, json
+SECRET_KEYS = {<span class="s">"password"</span>, <span class="s">"token"</span>,
+               <span class="s">"authorization"</span>, <span class="s">"card_number"</span>}
+
+<span class="k">class</span> MaskFilter(logging.Filter):
+    <span class="k">def</span> filter(self, record):
+        <span class="k">if</span> isinstance(record.msg, dict):
+            record.msg = {
+                k: (<span class="s">"***"</span> <span class="k">if</span> k.lower() <span class="k">in</span> SECRET_KEYS
+                    <span class="k">else</span> v)
+                <span class="k">for</span> k, v <span class="k">in</span> record.msg.items()
+            }
+        <span class="k">return</span> <span class="k">True</span>
+app.logger.addFilter(MaskFilter())
+
+@app.post(<span class="s">"/login"</span>)
+<span class="k">def</span> login():
+    ...
+    <span class="ok">app.logger.info({
+        "event": "login", "user_id": user.id,
+        "ip": request.remote_addr, "result": "ok",
+        "request_id": g.request_id,
+    })</span></code></pre><div class="why">出す項目を決めて構造化し、万一秘密のキーが混ざってもフィルタで伏せる。</div></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>観点</th><th>決めること</th></tr>
+  <tr><td><b>形式</b></td><td><span class="term" data-tip="構造化ログ：JSON などの決まった形式で項目ごとに残すログ。検索・集計・アラートがしやすい。">構造化ログ</span>（JSON）。項目名を統一する（<code>event</code>、<code>user_id</code>、<code>ip</code>、<code>result</code>、<code>request_id</code>）</td></tr>
+  <tr><td><b>時刻</b></td><td>UTC に統一するか、タイムゾーンを明記する（<code>2026-10-22T03:14:15Z</code>）。サーバー間で時刻を同期する（NTP）。ずれていると事故の時系列が組めない</td></tr>
+  <tr><td><b>追跡</b></td><td>リクエストごとに<span class="term" data-tip="相関 ID：1つのリクエストに付ける一意の ID。複数のサービスをまたいでログをつなげるために使う。">相関 ID</span>を発行し、全ログに付ける。利用者に見せるエラーの「問い合わせ番号」にも使える</td></tr>
+  <tr><td><b>保管</b></td><td>1か所に集める（ログ基盤・クラウドのログサービス）。<b>追記のみ・削除不可</b>にし、本番サーバーの権限では消せないようにする。侵入者は痕跡を消しに来る</td></tr>
+  <tr><td><b>期間</b></td><td>規程で決める（例：認証・操作ログは1年、アクセスログは90日）。侵入から発覚まで数か月かかることがあるので短すぎない期間にする</td></tr>
+</table></div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：ログの確かめ方</div>
+  <ul style="margin:0">
+    <li>わざとログインに失敗し、ログに「誰が・いつ・どこから・失敗」が残り、入力したパスワードが残っていないことを見る。</li>
+    <li>ログ全体を <code>password</code>・<code>token</code>・<code>Authorization</code>・<code>Bearer</code> で検索し、値が入っていないか確かめる。</li>
+    <li>本番サーバーにログインしたままログ基盤のログを削除できるか試す。できたら権限の分離が足りない。</li>
+  </ul>
+</div>
+
+<h2 id="monitoring">3. 監視とアラート：異常の兆候</h2>
+<p>ログを集めただけでは、誰も見ません。<b>少数の確実な兆候</b>にアラートを付け、通知が来たら必ず見る、という状態を作ります。最初から条件を増やすと、鳴りすぎて誰も見なくなります（<span class="term" data-tip="アラート疲れ：通知が多すぎて重要なものまで無視されるようになる状態。">アラート疲れ</span>）。</p>
+<div class="table-wrap"><table>
+  <tr><th>兆候</th><th>疑うこと</th><th>アラート条件の例</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/threat/key-square.svg" alt="">ログイン失敗の急増</td><td>総当たり、パスワードリスト攻撃（第4章）</td><td>同じ IP から1分に10回以上の失敗。同じ利用者に対して多数の IP から失敗</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/alarm-clock.svg" alt="">深夜・休日の管理操作</td><td>乗っ取られたアカウントによる操作</td><td>業務時間外の管理画面ログイン、設定変更</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/people/user-cog.svg" alt="">権限の変更・新しい管理者</td><td>権限昇格、侵入者による足場づくり</td><td>管理者ロールの付与、新規管理者アカウント作成は毎回通知</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/download.svg" alt="">大量のデータ参照・エクスポート</td><td>情報の持ち出し（外部・内部）</td><td>1利用者あたりの参照件数が普段の10倍、エクスポート機能の連続実行</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/send.svg" alt="">外向きの異常な通信</td><td>侵入後の持ち出し、攻撃者のサーバーへの接続</td><td>サーバーから見覚えのない宛先への通信、送信量の急増</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/cpu.svg" alt="">CPU・費用の急騰</td><td>暗号資産マイニング、乗っ取られたクラウドアカウントでのサーバー大量起動</td><td>CPU が長時間 100%、クラウドの請求アラート（予算の超過）</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/threat/file-warning.svg" alt="">入力検証エラー・4xx の急増</td><td>脆弱性の探索（スキャン）</td><td>特定の経路への 400／403／404 が短時間に集中</td></tr>
+</table></div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：最初の3つは「失敗・権限・外向き」</div>
+  <p>全部をいきなり入れる必要はありません。<b>ログイン失敗の急増</b>、<b>権限の変更</b>、<b>外向きの異常通信（または請求アラート）</b>の3つから始めれば、侵入の「入口・足場・持ち出し」の3段階それぞれに1つずつ目が付きます。</p>
+</div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする</div>
+  <ul style="margin:0">
+    <li>アラートは必ず<b>人に届く経路</b>（チャット・メール・電話）に送る。ダッシュボードに出るだけでは誰も見ない。</li>
+    <li>作ったら<b>わざと鳴らす</b>（テスト用アカウントで10回ログイン失敗する）。鳴らないアラートは無いのと同じ。</li>
+    <li>鳴ったときに「何を見て、誰に連絡するか」を5節の手順書に書いておく。</li>
+  </ul>
+</div>
+
+<h2 id="backup">4. バックアップとランサムウェア</h2>
+<p>ランサム攻撃は IPA 10大脅威 2026 の組織向け1位で、11年連続の選出です。侵入後にデータを暗号化して業務を止め、復旧と「公開しない」ことの両方に金銭を要求します。<b>攻撃者は暗号化の前にバックアップを探して消す</b>ので、「毎晩取っている」だけでは守れません。</p>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>
+  <p>「ランサムウェア被害により基幹システムが停止し、受注・出荷を停止。バックアップも暗号化されており、復旧のめどは立っていない。」</p>
+  <ul style="margin:0">
+    <li>「基幹システムが停止」→ 壊れたのは可用性（第1章）。売上に直結するので金銭要求が通りやすい</li>
+    <li>「バックアップも暗号化」→ バックアップが本番と同じネットワーク・同じ権限で書き換え可能だった</li>
+    <li>「復旧のめどが立たない」→ 復元の手順と所要時間（RTO）を事前に試していなかった</li>
+  </ul>
+</div>
+<div class="diagram">
+  <div class="dtitle">3-2-1 ルール：3つの複製、2種類の媒体、1つは別の場所（うち1つは書き換え不可）</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/asset/database.svg" alt="">本番データ<small>1つ目</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/asset/hard-drive.svg" alt="">同じ拠点の別媒体<small>2つ目：すばやく戻す用</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/defense/vault.svg" alt="">別の場所・別権限<small>3つ目：書き換え不可</small></div>
+  </div>
+  <div class="cap">3つ目は本番の権限では書き込みも削除もできないようにする。クラウドならバージョニング＋オブジェクトロック、または別アカウント。物理ならネットワークから切り離したオフライン媒体。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>観点</th><th>決めること・やること</th></tr>
+  <tr><td><b>RPO</b><br><small class="muted">Recovery Point Objective</small></td><td>失ってよいデータの期間。「1日分なら許容」なら毎日、「1時間」なら継続的なレプリケーションやログ出荷が要る</td></tr>
+  <tr><td><b>RTO</b><br><small class="muted">Recovery Time Objective</small></td><td>戻すまでに許される時間。「4時間」なら、復元手順を4時間以内でできることを実際に試して確かめる</td></tr>
+  <tr><td><b>書き換え不可</b></td><td><span class="term" data-tip="イミュータブル：一度書いたら期間内は変更も削除もできない保存方式。ランサムウェアや侵入者に消されない。">イミュータブル</span>（オブジェクトロック）か、オフライン媒体。本番の認証情報では触れない権限にする</td></tr>
+  <tr><td><b>暗号化とアクセス制御</b></td><td>バックアップには全データが入る。保存時に暗号化し、読める人を最小にする（第5章）。公開バケットに置くのは論外（第7章）</td></tr>
+  <tr><td><b>復元テスト</b></td><td>四半期に1回など、実際にバックアップから別環境へ復元して起動する。手順書に所要時間を記録する</td></tr>
+  <tr><td><b>範囲</b></td><td>DB だけでなく、設定（IaC）、秘密情報（別経路で）、アップロードされたファイル、鍵。「DB は戻ったがファイルが無い」を防ぐ</td></tr>
+</table></div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：同じサーバーに、同じ権限で</div><pre class="code"><code><span class="lang">crontab</span><span class="c"># 毎晩3時に、同じサーバーの別フォルダへ</span>
+0 3 * * * pg_dump mydb &gt; <span class="hl">/var/backups/mydb.sql</span>
+<span class="c"># 本番と同じディスク、同じ root 権限、暗号化なし</span>
+<span class="c"># 復元は一度も試していない</span></code></pre><div class="why">サーバーが暗号化されればバックアップも一緒に暗号化される。侵入者は <code>rm</code> 一発で消せる。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：別の場所へ、書き込み専用の権限で、暗号化して</div><pre class="code"><code><span class="lang">crontab（概要）</span><span class="c"># 書き込み専用のロールで、別アカウントのバケットへ</span>
+0 3 * * * pg_dump mydb | gzip \
+  | gpg -e -r backup@example.com \
+  | aws s3 cp - <span class="ok">s3://backup-bucket/mydb/$(date +\%F).sql.gz.gpg</span>
+<span class="c"># バケット側：バージョニング ON、オブジェクトロック（例：35日）、</span>
+<span class="c"># 本番ロールには put だけ許可し、delete と list は不許可</span>
+<span class="c"># 四半期ごとに別環境へ復元して起動することを試す</span></code></pre><div class="why">本番の権限では消せない。暗号化されているので置き場所が漏れても読めない。復元できることを試している。</div></div>
+</div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「クラウドの DB だから自動バックアップがある」→ 自動バックアップは<b>同じアカウント・同じ権限</b>で消せることが多い。アカウント乗っ取りには効かない。別アカウントへのコピーを足す。</li>
+    <li>「レプリカ（複製）があるからバックアップ不要」→ レプリカは誤削除・暗号化も即座に複製する。バックアップとは別物。</li>
+    <li>「身代金を払えば戻る」→ 戻る保証はなく、支払いが次の攻撃の資金になる。払わなくて済むようにバックアップを守る。</li>
+  </ul>
+</div>
+
+<h2 id="incident">5. インシデント対応の手順</h2>
+<p>事故は「起きるか」ではなく「いつ起きるか」です。<b>起きてから考えると、慌てて証拠を消し、連絡が遅れ、被害が広がります</b>。手順を1枚にまとめ、全員がその場所を知っている状態にしておきます。個人開発でも、自分用に書いておく価値があります。</p>
+<div class="diagram">
+  <div class="dtitle">インシデント対応の6段階</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node sm"><img src="../assets/icons/defense/radar.svg" alt="">① 検知</div>
+    <div class="arr">→</div>
+    <div class="node sm"><img src="../assets/icons/ops/notebook-pen.svg" alt="">② 初動<small>記録・連絡・保全</small></div>
+    <div class="arr">→</div>
+    <div class="node sm"><img src="../assets/icons/threat/unplug.svg" alt="">③ 封じ込め<small>隔離・鍵の交換</small></div>
+    <div class="arr">→</div>
+    <div class="node sm"><img src="../assets/icons/ops/wrench.svg" alt="">④ 根絶<small>原因を直す</small></div>
+    <div class="arr">→</div>
+    <div class="node sm"><img src="../assets/icons/ops/archive-restore.svg" alt="">⑤ 復旧</div>
+    <div class="arr">→</div>
+    <div class="node sm"><img src="../assets/icons/ops/history.svg" alt="">⑥ 振り返り</div>
+  </div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>段階</th><th>やること</th><th>やってはいけないこと</th></tr>
+  <tr><td><b>① 検知</b></td><td>アラート、利用者からの連絡、外部からの指摘、ログの異常。「おかしい」と思ったら手順を開く</td><td>「気のせい」で済ませる。1人で抱える</td></tr>
+  <tr><td><b>② 初動</b></td><td><b>記録</b>（時刻・見たもの・やったことを時系列でメモ）、<b>連絡</b>（責任者・チーム。決めてある連絡先へ）、<b>証拠保全</b>（ログのコピー、ディスクやメモリのスナップショット、時刻の確認）</td><td><b>慌てて消す・再起動する</b>。メモリ上の証拠とログが消える。攻撃者に気づいたことを知らせる操作も避ける</td></tr>
+  <tr><td><b>③ 封じ込め</b></td><td>該当サーバーをネットワークから隔離（止めずに切り離す）、漏れた可能性のある認証情報を<b>すべてローテーション</b>（パスワード・API キー・セッションの無効化）、不正なアカウントの停止</td><td>原因が分からないまま「とりあえず戻す」。同じ穴から再侵入される</td></tr>
+  <tr><td><b>④ 根絶</b></td><td>侵入経路を特定して直す（パッチ・設定・コード）。仕込まれたもの（バックドア・不正アカウント・改ざんファイル）を取り除く。必要なら作り直す</td><td>見つかったマルウェアだけ消して終わる</td></tr>
+  <tr><td><b>⑤ 復旧</b></td><td>きれいな状態（バックアップ・再構築）から戻す。監視を強化した状態で段階的に再開する</td><td>侵害された可能性のある状態のまま再開する</td></tr>
+  <tr><td><b>⑥ 振り返り</b></td><td>時系列をまとめ、「なぜ防げなかったか」「なぜ気づくのに時間がかかったか」を<b>個人を責めずに</b>分析し、対策を期限付きで決める</td><td>犯人探しで終わる。報告書を書いて読まれない</td></tr>
+</table></div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：初動は「消すな・切るな・書き残せ」</div>
+  <p>再起動しない（消すな）、電源を切らない（切るな）、時刻と行動をメモする（書き残せ）。ネットワークから切り離すのは可。これだけ守れば、後から専門家が調査できます。</p>
+</div>
+<p>手順書は、次のような1枚で十分です。リポジトリの <code>docs/</code> や Wiki など、<b>本番が止まっていても読める場所</b>に置きます。</p>
+<pre class="code"><code><span class="lang">docs/incident-response.md（例）</span># インシデント対応 1枚シート
+
+## 連絡先（この順に）
+1. 責任者：〇〇（電話・チャット）
+2. インフラ担当：〇〇
+3. 法務・広報（個人情報の漏えいの可能性があるとき）：〇〇
+4. 外部：JPCERT/CC（インシデント報告・相談）、契約しているセキュリティ会社
+
+## 初動チェック
+- [ ] 時刻・見たもの・やったことを時系列でメモし始めた
+- [ ] 責任者に連絡した（1人で抱えない）
+- [ ] 再起動・電源断・ファイル削除をしていない
+- [ ] ログをコピーし、スナップショットを取った
+- [ ] 該当サーバーをネットワークから隔離した
+- [ ] 漏れた可能性のある認証情報をローテーションした
+
+## 判断
+- 個人情報が含まれる可能性 → 7節の報告義務を確認。法務へ
+- カード情報が含まれる可能性 → 決済代行・カード会社の手続きへ
+
+## 復旧後
+- [ ] 振り返り（責めない）を1週間以内に実施
+- [ ] 対策に期限と担当を付けた</code></pre>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>相談先</div>
+  <p style="margin:0"><a href="https://www.jpcert.or.jp/">JPCERT/CC</a> はインシデントの報告・相談を受け付けている日本の組織です。また、各都道府県警察にはサイバー犯罪の相談窓口があります。攻撃者と単独で交渉せず、専門家と法務に相談してください。</p>
+</div>
+
+<h2 id="vuln-response">6. 脆弱性情報の追い方と対応手順</h2>
+<p>脆弱性は毎日公表されます。全部を読む必要はありません。<b>自分が使っている部品の情報だけが届く仕組み</b>を作り、届いたら第1章の3問で仕分けします。</p>
+<div class="table-wrap"><table>
+  <tr><th>情報源</th><th>何が届くか</th><th>設定</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/dependabot.svg" alt="">GitHub Dependabot alerts</td><td>リポジトリの依存ライブラリに脆弱性が見つかったとき、該当する版と修正版</td><td>リポジトリ設定で有効化。通知先をメールかチャットに（第6章）</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/newspaper.svg" alt="">JVN・IPA</td><td>日本語の脆弱性情報。国内製品や、国内で影響が大きいもの</td><td><a href="https://jvn.jp/">JVN</a> の RSS、IPA の注意喚起をメールやフィードで購読</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/ops/bell-ring.svg" alt="">ベンダーのセキュリティアドバイザリ</td><td>使っている OS・DB・フレームワーク・クラウドの公式情報</td><td>各製品の security announce メーリングリストや RSS を購読</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/brand/trivy.svg" alt="">コンテナ・OS のスキャン</td><td>イメージや OS パッケージの既知の脆弱性</td><td>CI と定期実行（第6章 8.、第7章 6.）</td></tr>
+</table></div>
+<div class="steps-grid">
+  <div class="step"><span class="k">STEP 1</span><b>影響判断</b><p>使っているか・外から届くか・直したか（第1章の3問）。lock ファイルやイメージで裏を取る。</p></div>
+  <div class="step"><span class="k">STEP 2</span><b>一時対策</b><p>すぐにパッチを当てられないなら、回避策（機能の無効化、WAF の規則、該当経路の遮断）で時間を稼ぐ。</p></div>
+  <div class="step"><span class="k">STEP 3</span><b>パッチ適用</b><p>修正版に上げ、テストを通してデプロイする。緊急時は通常のリリース手順を短縮する取り決めを事前にしておく。</p></div>
+  <div class="step"><span class="k">STEP 4</span><b>確認</b><p>実際に動いている版が修正版になったことを確かめる。回避策を外してよいか判断する。</p></div>
+  <div class="step"><span class="k">STEP 5</span><b>記録</b><p>CVE 番号、判断、対応日、担当を1行で残す。監査や振り返りで使う。</p></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>深刻度（CVSS）</th><th>対応期限の例</th></tr>
+  <tr><td>緊急（9.0〜）で、使っていて外から届く</td><td><b>当日</b>。パッチか回避策を入れるまで帰らない</td></tr>
+  <tr><td>高（7.0〜8.9）</td><td>1週間以内</td></tr>
+  <tr><td>中（4.0〜6.9）</td><td>次の定期リリース</td></tr>
+  <tr><td>低（〜3.9）</td><td>自動更新の PR に任せる</td></tr>
+</table></div>
+
+<h2 id="legal">7. 個人情報漏えい時の報告義務</h2>
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>個人情報が漏えいしたら、報告と通知が法律上の義務</div>
+  <p>個人情報保護法では、一定の漏えい等が起きた（おそれがある）場合、事業者は<b>個人情報保護委員会への報告</b>と<b>本人への通知</b>が義務です。おおむね次の場合が対象です。</p>
+  <ul>
+    <li>要配慮個人情報（病歴・信条など）の漏えい</li>
+    <li>財産的被害が生じるおそれがある漏えい（クレジットカード番号・口座情報など）</li>
+    <li>不正の目的による漏えい（不正アクセス、ランサムウェアなど）</li>
+    <li>1,000 人を超える漏えい</li>
+  </ul>
+  <p>報告は2段階で、<b>速報はおおむね3〜5日以内</b>、<b>確報は30日以内</b>（不正の目的によるものは60日以内）とされています。「漏えいしたおそれ」の段階で対象になるので、公開状態になっていた期間は「取られた前提」で判断します。日数や対象は法改正で変わることがあるため、必ず<a href="https://www.ppc.go.jp/">個人情報保護委員会</a>の最新の案内を確認し、<b>判断は法務・専門家と一緒に</b>行ってください。</p>
+  <p style="margin:0">クレジットカード情報が関わる場合は、別途、決済代行会社・カード会社への連絡と、加盟店契約・PCI DSS に基づく手続きが必要です。</p>
+</div>
+<p>開発者が知っておくべきことは3つです。<b>①</b> 漏えいの可能性に気づいたら、自分で判断を抱えずすぐに責任者へ上げる（初動の「連絡」）。<b>②</b> 何件・どの項目が漏れた可能性があるかを答えられるのは開発者なので、ログとデータの構造から特定する準備をしておく。<b>③</b> 期限が短いので、5節の手順書に「個人情報の可能性 → 法務へ」の一行を入れておく。</p>
+
+<h2 id="housekeeping">8. 権限の棚卸し</h2>
+<p>権限とアカウントは、放っておくと増える一方です。退職者のアカウント、作ったまま忘れた API キー、全員が知っている共有パスワード。これらは内部不正（IPA 10大脅威 2026 の7位）と、乗っ取り後の横移動の両方に使われます。</p>
+<div class="table-wrap"><table>
+  <tr><th>いつ</th><th>やること</th></tr>
+  <tr><td><b>退職・異動の当日</b></td><td>アカウントの無効化、SSO からの削除、その人が知っていた共有パスワード・鍵のローテーション。「当日」が守れるよう、入退社手続きに組み込む</td></tr>
+  <tr><td><b>月1回</b></td><td>管理者権限を持つアカウントの一覧を見て、全員に理由があるか確認する。新しい管理者が増えていないか</td></tr>
+  <tr><td><b>四半期に1回</b></td><td>API キー・アクセスキーの一覧と最終使用日を見て、使っていないものを削除する。90日以上更新していないキーをローテーションする</td></tr>
+  <tr><td><b>年1回</b></td><td><a href="../checklist.html">チェックリスト</a>の「運用のとき」を全部見直す。公開範囲（第7章）、ログの保管期間、バックアップの復元テスト、手順書の連絡先</td></tr>
+  <tr><td><b>常に</b></td><td>共有アカウントを作らない（誰の操作か分からなくなる）。やむを得ない場合はパスワードマネージャーで管理し、操作ログで追えるようにする</td></tr>
+</table></div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：運用で言う一言</div>
+  <ul style="margin:0">
+    <li>「このログ、トークンがそのまま出ていませんか？ 保管期間と削除権限はどうなっていますか？」</li>
+    <li>「ログイン失敗の急増と管理者の追加、アラートは鳴りますか？ 最後に鳴らしたのはいつですか？」</li>
+    <li>「バックアップ、本番の権限で消せますか？ 最後に復元を試したのはいつですか？」</li>
+    <li>「事故が起きたら、最初に誰に連絡しますか？ 手順書はどこにありますか？」</li>
+    <li>「先月退職した人のアカウントと、その人が知っていた鍵はどうなっていますか？」</li>
+  </ul>
+</div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「ログは全部残しておけば安心」→ 秘密を含むログは第2の漏えい元。何を残さないかを先に決める。</li>
+    <li>「監視ツールを入れたから見えている」→ 人に届くアラートがなければ誰も見ない。わざと鳴らして確かめる。</li>
+    <li>「不審だったのでサーバーを再起動して直った」→ 証拠が消え、侵入経路も残ったまま。再起動の前に記録と保全。</li>
+    <li>「漏えいしたか確証がないので報告はまだ」→ 「おそれ」の段階で義務が生じる。法務と相談して判断する。</li>
+  </ul>
+</div>
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典</div>
+  <p style="margin:0">OWASP Top 10:2025 <a href="https://top10.owasp.org/2025/ja/">A09 セキュリティログとアラートの不備</a>、OWASP Cheat Sheet「<a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html">Logging</a>」「<a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Vocabulary_Cheat_Sheet.html">Logging Vocabulary</a>」、IPA「<a href="https://www.ipa.go.jp/security/10threats/10threats2026.html">情報セキュリティ10大脅威 2026</a>」、<a href="https://www.jpcert.or.jp/">JPCERT/CC</a>、<a href="https://www.ppc.go.jp/">個人情報保護委員会</a>（漏えい等の報告・本人通知）。</p>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>構造化ログ</dt><dd>JSON などの決まった形式で項目ごとに残すログ。検索・集計・アラートがしやすい。</dd>
+    <dt>相関 ID</dt><dd>1つのリクエストに付ける一意の ID。複数のサービスをまたいでログをつなげる。利用者に見せる問い合わせ番号にも使える。</dd>
+    <dt>NTP</dt><dd>サーバーの時刻を合わせる仕組み。ずれていると事故の時系列が組めない。</dd>
+    <dt>アラート疲れ</dt><dd>通知が多すぎて重要なものまで無視されるようになる状態。少数の確実な条件から始める。</dd>
+    <dt>3-2-1 ルール</dt><dd>バックアップは3つの複製、2種類の媒体、1つは別の場所に置く、という目安。</dd>
+    <dt>イミュータブル</dt><dd>一度書いたら期間内は変更も削除もできない保存方式。オブジェクトロックなど。</dd>
+    <dt>RPO／RTO</dt><dd>RPO は失ってよいデータの期間、RTO は戻すまでに許される時間。バックアップの頻度と復元手順を決める基準。</dd>
+    <dt>封じ込め</dt><dd>被害がこれ以上広がらないようにする処置。隔離と認証情報のローテーション。</dd>
+    <dt>証拠保全</dt><dd>調査に必要なログ・ディスク・メモリの状態を、消えたり変わったりする前に保存すること。</dd>
+    <dt>バックドア</dt><dd>侵入者が再び入るために仕込む裏口。不正アカウント・改ざんされたプログラムなど。</dd>
+    <dt>要配慮個人情報</dt><dd>人種・信条・病歴・犯罪歴など、特に慎重な扱いが必要と法律で定められた個人情報。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>運用の仕事3つと、それぞれの手段は？</summary><div class="a">検知（ログ・監視・アラート）、回復（バックアップ）、対応（手順書どおりに動く）。予防だけでは足りない（OWASP A09）。</div></details>
+  <details class="q"><summary>ログに残すものを5つ、残さないものを4つ挙げてください。</summary><div class="a">残す：認証の成否、権限の変更、重要データの参照・変更・削除・エクスポート、管理操作、入力検証エラー・例外。残さない：パスワード、トークン・セッション ID、カード番号、個人情報の本体。</div></details>
+  <details class="q"><summary>ログの形式・時刻・追跡・保管で決めることは？</summary><div class="a">JSON の構造化ログ／UTC かタイムゾーン明記、NTP で同期／相関 ID を全ログに／1か所に集め、追記のみ・本番の権限では消せないようにし、保管期間を規程で決める。</div></details>
+  <details class="q"><summary>監視の兆候を5つ以上挙げてください。最初に入れる3つは？</summary><div class="a">ログイン失敗の急増、深夜の管理操作、権限の変更・新しい管理者、大量エクスポート、外向きの異常通信、CPU・費用の急騰、4xx の急増。最初は「失敗・権限・外向き（または請求アラート）」。</div></details>
+  <details class="q"><summary>アラートを作った後に必ずすることは？</summary><div class="a">わざと鳴らして、人に届く経路（チャット・メール・電話）に通知が来ることを確かめる。鳴ったときの行動を手順書に書く。</div></details>
+  <details class="q"><summary>3-2-1 ルールとは？ランサムウェアに効くために足す条件は？</summary><div class="a">3つの複製、2種類の媒体、1つは別の場所。うち1つは書き換え不可（オブジェクトロック）かオフラインにし、本番の権限では消せないようにする。</div></details>
+  <details class="q"><summary>「同じサーバーの別フォルダに毎晩バックアップ」はなぜ効かないか。</summary><div class="a">サーバーが暗号化されれば一緒に暗号化され、侵入者に一発で消される。別の場所・別権限・暗号化・復元テストが要る。</div></details>
+  <details class="q"><summary>RPO と RTO とは？</summary><div class="a">RPO＝失ってよいデータの期間（バックアップの頻度を決める）。RTO＝戻すまでに許される時間（復元手順を実際に試して確かめる）。</div></details>
+  <details class="q"><summary>インシデント対応の6段階を順に言ってください。</summary><div class="a">検知 → 初動（記録・連絡・証拠保全）→ 封じ込め（隔離・認証情報のローテーション）→ 根絶（原因を直す）→ 復旧（きれいな状態から）→ 振り返り（責めない）。</div></details>
+  <details class="q"><summary>不審なログインを見つけたとき、再起動してよいですか。初動の合言葉は？</summary><div class="a">だめ。メモリ上の証拠とログが消える。「消すな・切るな・書き残せ」。ネットワークからの隔離は可。</div></details>
+  <details class="q"><summary>脆弱性情報の対応手順5段階と、Critical・High・Medium の期限の例は？</summary><div class="a">影響判断（3問）→ 一時対策 → パッチ適用 → 確認 → 記録。Critical は当日、High は1週間以内、Medium は次の定期リリース。</div></details>
+  <details class="q"><summary>個人情報が漏えいしたときの法律上の義務と、報告の期限の目安は？</summary><div class="a">個人情報保護委員会への報告と本人への通知。速報はおおむね3〜5日以内、確報は30日以内（不正目的なら60日以内）。「おそれ」の段階で対象。判断は法務・専門家と。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+</body>
+</html>

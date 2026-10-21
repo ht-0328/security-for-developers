@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>まずこれだけ：開発者が守る10のルール | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../" data-page="ch02">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第2章</div>
+<p><span class="badge basic">基礎</span><span class="badge impl">実装</span></p>
+<h1>第2章 まずこれだけ：開発者が守る10のルール</h1>
+<p class="lead">細かい攻撃名を知らなくても、この10個を守れば「よくある穴」の大半はふさがります。各ルールは「何を・なぜ（どんな事故になるか）・どうやって・どう確かめるか」の4点で書いています。詳しい原理は第3章以降で扱うので、ここでは行動を決めることが目的です。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>入口を固める（ルール 1〜4）</b>
+      <ol>
+        <li>外から来るものは全部疑う：入力の検証はサーバー側で、型・長さ・範囲・許可リスト</li>
+        <li>文字列をつなげて命令を作らない：SQL はプレースホルダ、HTML はテンプレートの自動エスケープ、OS コマンドは呼ばない</li>
+        <li>認証は自分で作らない：フレームワーク標準か認証サービス。パスワードは bcrypt／Argon2、多要素認証を用意</li>
+        <li>「何をしてよいか」は毎回サーバーで確かめる：URL の ID を変えても他人のものが見えない。許可されていなければ拒否</li>
+      </ol>
+    </li>
+    <li><b>宝を隠す（ルール 5〜6）</b>
+      <ol start="5">
+        <li>秘密はコードに書かない：環境変数かシークレット管理。漏れたら即ローテーション</li>
+        <li>通信は全部 HTTPS、Cookie には Secure・HttpOnly・SameSite</li>
+      </ol>
+    </li>
+    <li><b>家を整える（ルール 7〜8）</b>
+      <ol start="7">
+        <li>部品は最新に保つ：lock ファイル、自動更新、スキャン、EoL を使わない</li>
+        <li>必要最小限だけ開ける：ポート・公開設定・権限・管理画面は「閉」が初期値</li>
+      </ol>
+    </li>
+    <li><b>見張る（ルール 9〜10）</b>
+      <ol start="9">
+        <li>記録は残す、秘密は残さない：誰が何をしたかをログに、パスワードやカード番号はログに書かない。利用者には一般的なエラー文</li>
+        <li>人の目と機械の目に乗せる：PR テンプレートにチェック項目、CI に自動検査、設計時に「悪用されたら」を1回</li>
+      </ol>
+    </li>
+    <li><b>明日からの3手</b>：今日 依存スキャンを1回回す／今週 秘密情報がリポジトリにないか検索する／今月 チェックリストを PR テンプレートに入れる</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに10個を自分の言葉で言えるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>10のルールの一覧と、4つのまとまり</li>
+    <li>入口を固める：ルール 1〜4</li>
+    <li>宝を隠す：ルール 5〜6</li>
+    <li>家を整える：ルール 7〜8</li>
+    <li>見張る：ルール 9〜10</li>
+    <li>よくある言い訳と、その返し</li>
+    <li>明日からの3手</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>画面側（JavaScript）で入力チェックをしていれば、サーバー側のチェックは省いてよいか。</li>
+    <li>API キーを <code>config.js</code> に書いて、リポジトリは非公開にしてある。問題はあるか。</li>
+    <li>「社内の人しか使わないシステム」に、認可の確認は要るか。</li>
+  </ul>
+</div>
+
+<h2 id="overview">1. 10のルールの一覧と、4つのまとまり</h2>
+<div class="diagram">
+  <div class="dtitle">10のルールは「入口を固める・宝を隠す・家を整える・見張る」の4つに分かれる</div>
+  <div class="grp-row">
+    <div class="grp plain"><div class="glabel"><span class="gtxt">入口を固める</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/defense/filter.svg" alt="">1 疑う</div>
+        <div class="node sm"><img src="../assets/icons/defense/brick-wall.svg" alt="">2 つながない</div>
+        <div class="node sm"><img src="../assets/icons/defense/fingerprint.svg" alt="">3 作らない</div>
+        <div class="node sm"><img src="../assets/icons/defense/badge-check.svg" alt="">4 確かめる</div>
+      </div>
+    </div>
+    <div class="grp plain"><div class="glabel"><span class="gtxt">宝を隠す</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/defense/vault.svg" alt="">5 書かない</div>
+        <div class="node sm"><img src="../assets/icons/defense/lock.svg" alt="">6 暗号化</div>
+      </div>
+    </div>
+  </div>
+  <div class="grp-row">
+    <div class="grp plain"><div class="glabel"><span class="gtxt">家を整える</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/asset/package-check.svg" alt="">7 最新に</div>
+        <div class="node sm"><img src="../assets/icons/defense/door-closed.svg" alt="">8 閉じる</div>
+      </div>
+    </div>
+    <div class="grp plain"><div class="glabel"><span class="gtxt">見張る</span></div>
+      <div class="flow wrap-ok">
+        <div class="node sm"><img src="../assets/icons/ops/clipboard-list.svg" alt="">9 残す</div>
+        <div class="node sm"><img src="../assets/icons/ops/workflow.svg" alt="">10 乗せる</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：「疑う・つながない・作らない・確かめる／書かない・暗号化／最新に・閉じる／残す・乗せる」</div>
+  <p>4つのまとまりで思い出します。<b>入口</b>（入ってくるものを疑い、命令につなげず、認証は作らず、権限を確かめる）→ <b>宝</b>（秘密を書かず、通信を暗号化）→ <b>家</b>（部品を最新に、不要な扉は閉じる）→ <b>見張り</b>（記録を残し、レビューと検査に乗せる）。</p>
+</div>
+
+<h2 id="group1">2. 入口を固める：ルール 1〜4</h2>
+
+<div class="rule" id="rule1">
+  <div class="rhead"><img src="../assets/icons/defense/filter.svg" alt=""><div><div class="rnum">RULE 1</div><div class="rtitle">外から来るものは全部疑う（入力はサーバー側で検証する）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>フォームの値、URL のパラメータ、HTTP ヘッダー、Cookie、アップロードされたファイル、外部 API の応答。<b>利用者のブラウザから来るものは、すべて攻撃者が自由に書き換えられる</b>と考えます。</dd>
+    <dt>なぜ</dt><dd>画面の JavaScript による入力チェックは、ブラウザの開発者ツールや <code>curl</code> で簡単に迂回できます。「数値しか入らないはず」の欄に文字列が来て、SQL や処理が壊れるのが事故の入口です。</dd>
+    <dt>どうやって</dt><dd>サーバー側で、<b>型</b>（数値か文字列か）、<b>長さ</b>（上限）、<b>範囲</b>（0〜100 など）、<b>形式</b>（メールアドレス・日付）、<b>許可リスト</b>（選択肢はこの3つだけ）を検証します。禁止パターンを探す「ブラックリスト」ではなく、許す形を決める「許可リスト」で書きます。フレームワークのバリデーション機能（Django のフォーム、Spring の Bean Validation、zod など）を使います。</dd>
+    <dt>確かめ方</dt><dd>ブラウザを使わず <code>curl</code> で、想定外の値（負の数、長い文字列、別の利用者の ID）を直接送ってみる。サーバーが 400 系で拒否すれば OK。詳しくは <a href="03-injection-xss.html#validation">第3章 7.</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule2">
+  <div class="rhead"><img src="../assets/icons/defense/brick-wall.svg" alt=""><div><div class="rnum">RULE 2</div><div class="rtitle">文字列をつなげて命令を作らない（SQL・HTML・OS コマンド）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>SQL、HTML、OS コマンド、LDAP、ファイルパスなど「命令として解釈される文字列」に、利用者の入力を文字列連結で混ぜない。</dd>
+    <dt>なぜ</dt><dd>混ぜると、入力の中の記号（<code>'</code> や <code>&lt;script&gt;</code> や <code>;</code>）が命令の一部として解釈され、データの窃取・改ざん（SQL インジェクション）、他の利用者のブラウザでのスクリプト実行（XSS）、サーバーでの任意コマンド実行につながります。インジェクションは OWASP Top 10:2025 の A05 で、昔から今まで消えていません。</dd>
+    <dt>どうやって</dt><dd>SQL は<b>プレースホルダ</b>（<code>?</code> や <code>%s</code> に値を別渡し）か ORM。HTML は<b>テンプレートエンジンの自動エスケープ</b>に任せ、無効化する書き方（<code>|safe</code>、<code>dangerouslySetInnerHTML</code>、<code>innerHTML</code>）を使わない。OS コマンドは<b>呼ばない</b>のが最善で、どうしてもなら引数を配列で渡しシェルを経由しない。</dd>
+    <dt>確かめ方</dt><dd>リポジトリで <code>"SELECT</code> や <code>f"SELECT</code>、<code>+ " WHERE</code>、<code>innerHTML</code>、<code>subprocess</code>・<code>exec(</code> を検索し、入力が混ざっていないかを見る。詳しくは <a href="03-injection-xss.html">第3章</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule3">
+  <div class="rhead"><img src="../assets/icons/defense/fingerprint.svg" alt=""><div><div class="rnum">RULE 3</div><div class="rtitle">認証は自分で作らない（標準機能か認証サービス、パスワードは bcrypt／Argon2、多要素認証）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>ログイン、パスワードの保存、パスワードリセット、セッション管理、多要素認証。</dd>
+    <dt>なぜ</dt><dd>認証は「正しく作るのが難しいのに、間違えると全員のアカウントが危ない」領域です。平文や MD5 でのパスワード保存、推測できるセッション ID、リセット用トークンの使い回しなど、自作で起きる事故が決まっています。</dd>
+    <dt>どうやって</dt><dd>フレームワーク標準の認証機能（Django の auth、Rails の Devise、Spring Security、ASP.NET Identity）か、外部の認証サービス（<span class="term" data-tip="IDaaS：ログイン・会員管理をクラウドで提供するサービス。Auth0、Amazon Cognito、Firebase Authentication、Keycloak（自前運用）など。">IDaaS</span>）を使う。パスワードを自分で保存するなら <b>bcrypt か Argon2</b> でハッシュする（SHA-256 単体は不可）。多要素認証を用意し、管理者には必須にする。</dd>
+    <dt>確かめ方</dt><dd>DB の users テーブルのパスワード列を見て、<code>$2b$</code>（bcrypt）や <code>$argon2id$</code> で始まっていれば OK。平文・MD5・SHA-1 の16進数なら要修正。詳しくは <a href="04-auth-session.html#password">第4章 2.</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule4">
+  <div class="rhead"><img src="../assets/icons/defense/badge-check.svg" alt=""><div><div class="rnum">RULE 4</div><div class="rtitle">「何をしてよいか」は毎回サーバーで確かめる（認可・デフォルト拒否）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>データの閲覧・変更・削除、管理機能、他の利用者に関わる操作。「ログインしているか」（認証）だけでなく「<b>この人がこの対象にこの操作をしてよいか</b>」（認可）。</dd>
+    <dt>なぜ</dt><dd>OWASP Top 10:2025 の1位は「アクセス制御の不備」です。「URL の <code>/orders/123</code> を <code>/orders/124</code> に変えたら他人の注文が見えた」「画面にボタンがないだけで、API を直接叩けば削除できた」が典型です。自動ツールでは見つけにくく、人が設計で決めるしかありません。</dd>
+    <dt>どうやって</dt><dd>権限の表（誰が・何に・何をしてよいか）を設計時に作る。<b>すべての API</b> で、対象データの所有者や役割をサーバー側で確認する。確認処理は1か所（ミドルウェアや共通関数）にまとめ、「書き忘れたら拒否される」構造（デフォルト拒否）にする。</dd>
+    <dt>確かめ方</dt><dd>利用者 A でログインしたまま、利用者 B のデータの ID を URL や API に入れてアクセスする。403 や 404 になれば OK。詳しくは <a href="04-auth-session.html#authz">第4章 6.</a></dd>
+  </dl>
+</div>
+
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する：入口の4つ</div>
+  <p>郵便受けに入れられた物を<b>開封前に確かめ</b>（1）、入っていた紙を<b>そのまま命令書として実行せず</b>（2）、玄関の鍵は<b>専門メーカー製を使い</b>（3）、入った人にも<b>部屋ごとに入ってよいか確かめる</b>（4）。</p>
+</div>
+
+<h2 id="group2">3. 宝を隠す：ルール 5〜6</h2>
+
+<div class="rule" id="rule5">
+  <div class="rhead"><img src="../assets/icons/defense/vault.svg" alt=""><div><div class="rnum">RULE 5</div><div class="rtitle">秘密はコードに書かない（環境変数かシークレット管理、漏れたら即ローテーション）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>API キー、DB のパスワード、クラウドのアクセスキー、署名用の鍵、外部サービスのトークン。</dd>
+    <dt>なぜ</dt><dd>コードに書いた秘密は、リポジトリの履歴に<b>永久に残り</b>、非公開でもフォーク・CI のログ・退職者の手元・誤って公開への切り替え、で漏れます。公開リポジトリに入ったキーは数分でボットに拾われて悪用されます。</dd>
+    <dt>どうやって</dt><dd>環境変数か、クラウドのシークレット管理（AWS Secrets Manager、GCP Secret Manager、Vault）に置き、<code>.env</code> は <code>.gitignore</code> に入れる。<code>.env.example</code> にはキー名だけ書く。漏れたら「消す」ではなく<b>無効化して新しい鍵に替える</b>（ローテーション）。履歴から消しても、すでに取られた前提で動く。</dd>
+    <dt>確かめ方</dt><dd>リポジトリ全体を <code>AKIA</code>（AWS）、<code>sk-</code>、<code>password=</code>、<code>BEGIN PRIVATE KEY</code> などで検索する。gitleaks などのシークレットスキャンを CI に入れる。詳しくは <a href="05-crypto-secrets.html#secrets">第5章 5.</a>・<a href="05-crypto-secrets.html#leaked">6.</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule6">
+  <div class="rhead"><img src="../assets/icons/defense/lock.svg" alt=""><div><div class="rnum">RULE 6</div><div class="rtitle">通信は全部 HTTPS、Cookie には Secure・HttpOnly・SameSite</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>利用者とサーバーの間、サーバーと外部 API の間、サーバー同士の間の通信。ログイン状態を保つ Cookie。</dd>
+    <dt>なぜ</dt><dd>HTTP のままだと、同じ Wi-Fi にいる人や経路上の機器に、パスワードやセッション ID が丸見えで、書き換えもできます。Cookie に属性がないと、XSS でセッション ID を盗まれたり（HttpOnly なし）、HTTP に落とされて盗まれたり（Secure なし）、他サイトから勝手に送られたり（SameSite なし）します。</dd>
+    <dt>どうやって</dt><dd>証明書は無料の Let's Encrypt かクラウドの証明書サービスで取得し、自動更新にする。HTTP は HTTPS へ転送し、<span class="term" data-tip="HSTS（HTTP Strict Transport Security）：このサイトには今後 HTTPS でだけ接続せよ、とブラウザに記憶させる応答ヘッダー。">HSTS</span> を付ける。セッション Cookie には <code>Secure; HttpOnly; SameSite=Lax</code>（または Strict）を付ける。</dd>
+    <dt>確かめ方</dt><dd>ブラウザの開発者ツールの「アプリケーション → Cookie」で属性を確認する。<code>curl -I https://自分のサイト</code> で <code>Strict-Transport-Security</code> があるか見る。詳しくは <a href="05-crypto-secrets.html#tls">第5章 2.</a>・<a href="04-auth-session.html#cookie">第4章 4.</a></dd>
+  </dl>
+</div>
+
+<h2 id="group3">4. 家を整える：ルール 7〜8</h2>
+
+<div class="rule" id="rule7">
+  <div class="rhead"><img src="../assets/icons/asset/package-check.svg" alt=""><div><div class="rnum">RULE 7</div><div class="rtitle">部品は最新に保つ（lock ファイル・自動更新・スキャン・EoL を使わない）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>ライブラリ、フレームワーク、言語のランタイム、OS、コンテナのベースイメージ、DB・ミドルウェア。</dd>
+    <dt>なぜ</dt><dd>脆弱性のニュースの大半は「自分が書いていないコード」の穴です（IPA 10大脅威 2026 の2位、OWASP A03）。穴が公表されると、修正版を当てていないシステムが世界中から自動で狙われます。EoL のものは直す版が出ないので、使い続けること自体が穴です。</dd>
+    <dt>どうやって</dt><dd><b>lock ファイル</b>（<code>package-lock.json</code>、<code>poetry.lock</code> など）をコミットして、どの版を使っているかを確定させる。<b>自動更新</b>（Dependabot か Renovate）を有効にして PR を放置しない。<b>スキャン</b>（<code>npm audit</code>、<code>pip-audit</code>、Trivy）を CI に入れる。言語・フレームワークの<b>サポート期限</b>を把握し、EoL の前に上げる。</dd>
+    <dt>確かめ方</dt><dd>今すぐ <code>npm audit</code> か <code>pip-audit</code> を1回回す。High 以上が出たら、その部品を使っている箇所と外から届く経路を確かめる（第1章の3問）。詳しくは <a href="06-dependencies.html">第6章</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule8">
+  <div class="rhead"><img src="../assets/icons/defense/door-closed.svg" alt=""><div><div class="rnum">RULE 8</div><div class="rtitle">必要最小限だけ開ける（ポート・公開設定・権限・管理画面は「閉」が初期値）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>ネットワークのポート、ストレージの公開設定、クラウドの権限（IAM）、管理画面・デバッグ機能、サービスアカウントの権限、CI のトークンの権限。</dd>
+    <dt>なぜ</dt><dd>OWASP A02「セキュリティ設定の不備」。DB をインターネットに直接公開、ストレージを「全員に公開」、管理画面が初期パスワードのまま、CI のトークンが全リポジトリに書き込み可能。どれも「開けすぎ」が原因で、ボットが数時間で見つけます。</dd>
+    <dt>どうやって</dt><dd><b>最小権限</b>：その仕事に必要な権限だけを与える。<b>デフォルト閉</b>：公開・許可は明示的に必要なものだけ開ける。DB・キャッシュ・内部 API は外から到達できない位置に置く。管理画面は IP 制限や多要素認証で守る。本番でデバッグモードを切る。設定はコード（IaC）にして差分をレビューする。</dd>
+    <dt>確かめ方</dt><dd>外部から <code>nmap</code>（自分のサーバーに対してだけ）やクラウドの「公開アクセス」の警告で、開いているものを一覧にする。一覧にあるものすべてに「なぜ必要か」を書けるか。詳しくは <a href="07-infra-cloud.html">第7章</a></dd>
+  </dl>
+</div>
+
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する：宝と家</div>
+  <p>合鍵をドアマットの下に置かず（5）、窓は曇りガラスにし（6）、欠陥が見つかった建材は交換し（7）、使わない勝手口は塞いでおく（8）。</p>
+</div>
+
+<h2 id="group4">5. 見張る：ルール 9〜10</h2>
+
+<div class="rule" id="rule9">
+  <div class="rhead"><img src="../assets/icons/ops/clipboard-list.svg" alt=""><div><div class="rnum">RULE 9</div><div class="rtitle">記録は残す、秘密は残さない（ログとエラー表示）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>ログイン成功・失敗、権限の変更、データの削除・エクスポート、管理操作、エラー。これらを<b>誰が・いつ・何に</b>したかの形で残す。逆に、パスワード・カード番号・トークン・個人情報の本体はログに書かない。</dd>
+    <dt>なぜ</dt><dd>OWASP A09「ログとアラートの不備」。記録がないと、攻撃されたことに気づけず、気づいても範囲が特定できません。一方で、ログに秘密を書くと、ログ基盤が第2の漏えい元になります。また、利用者に見せるエラーにスタックトレースや SQL を出すと、攻撃者に内部構造を教えることになります。</dd>
+    <dt>どうやって</dt><dd>構造化ログ（JSON）で、利用者 ID・操作・対象・結果・時刻を残す。パスワードやトークンはログ出力前にマスクする。利用者には「処理に失敗しました（問い合わせ番号 XXXX）」のような一般的な文を見せ、詳細はログに残す。ログイン失敗の急増など、異常にはアラートを付ける。</dd>
+    <dt>確かめ方</dt><dd>わざと失敗する操作をして、ログに「誰が何をしたか」が残っているか、画面に内部情報が出ていないかを見る。ログを <code>password</code>・<code>token</code> で検索して、値が入っていないか確かめる。詳しくは <a href="08-operations-incident.html#logging">第8章 2.</a></dd>
+  </dl>
+</div>
+
+<div class="rule" id="rule10">
+  <div class="rhead"><img src="../assets/icons/ops/workflow.svg" alt=""><div><div class="rnum">RULE 10</div><div class="rtitle">人の目と機械の目に乗せる（レビューの観点・CI の自動検査・設計時の1問）</div></div></div>
+  <dl>
+    <dt>何を</dt><dd>コードレビュー、CI、設計レビュー。「気をつける」ではなく、<b>流れに組み込んで忘れても引っかかる</b>ようにする。</dd>
+    <dt>なぜ</dt><dd>人は忘れます。ルール 1〜9 を全員が毎回思い出すのは無理なので、PR テンプレートと自動検査で「思い出さなくても止まる」仕組みにします。設計の段階で「悪用されたら」を1回考えるだけで、後から直すと高くつく穴（認可の設計漏れ）を防げます。</dd>
+    <dt>どうやって</dt><dd>PR テンプレートに本サイトの<a href="../checklist.html">チェックリスト</a>の該当項目を入れる。CI に依存スキャン・シークレットスキャン・静的解析（SAST）を入れる。設計レビューで「この機能が悪用されたら、誰が何を失うか」を1問必ず聞く。</dd>
+    <dt>確かめ方</dt><dd>直近の PR に、セキュリティ観点のチェックが1つでも付いているか。CI が止めた実績が1つでもあるか。詳しくは <a href="09-secure-process.html">第9章</a></dd>
+  </dl>
+</div>
+
+<h2 id="excuses">6. よくある言い訳と、その返し</h2>
+<div class="table-wrap"><table>
+  <tr><th>言い訳</th><th>返し</th></tr>
+  <tr><td>「社内の人しか使わないシステムだから」</td><td>内部不正は IPA 10大脅威 2026 の7位。フィッシングで社員の端末が乗っ取られれば、攻撃者は「社内の人」として入ってくる。認可とログは社内システムにこそ要る。</td></tr>
+  <tr><td>「誰もそんなことしない」</td><td>人ではなくボットがする。インターネットに出した瞬間から、全アドレスを巡回するボットが既知の穴を自動で試す。</td></tr>
+  <tr><td>「フレームワークが守ってくれるはず」</td><td>既定値は守ってくれる。守られないのは、既定値を外したとき（<code>|safe</code>、<code>innerHTML</code>、生 SQL）と、フレームワークが関知しない認可の設計。</td></tr>
+  <tr><td>「画面でチェックしているから」</td><td>画面のチェックは利用者の操作ミスを防ぐため。攻撃者は画面を使わない（<code>curl</code> で直接送る）。</td></tr>
+  <tr><td>「リポジトリは非公開だから鍵を書いてもいい」</td><td>履歴に永久に残る。フォーク・CI ログ・退職者・公開への誤切替で漏れる。漏れたら即ローテーションが要るが、どこに書いたか把握できていないと替えられない。</td></tr>
+  <tr><td>「時間がないので後で直す」</td><td>後で直すほど高くつく（設計の穴は作り直し）。ルール 1〜10 のうち、今の PR で該当する1つだけでも守る。</td></tr>
+</table></div>
+
+<h2 id="next">7. 明日からの3手</h2>
+<div class="steps-grid">
+  <div class="step"><span class="k">今日（10分）</span><b>依存スキャンを1回回す</b><p><code>npm audit</code>、<code>pip-audit</code>、<code>bundle audit</code> など、自分の言語のコマンドを1回実行する。結果の High 以上を、第1章の3問で仕分けする。</p></div>
+  <div class="step"><span class="k">今週（30分）</span><b>秘密情報がリポジトリにないか検索する</b><p><code>AKIA</code>、<code>password=</code>、<code>BEGIN PRIVATE KEY</code>、<code>sk-</code> などで全履歴を検索する。見つかったら、消すより先にローテーションする。</p></div>
+  <div class="step"><span class="k">今月（1時間）</span><b>チェックリストを PR テンプレートに入れる</b><p>本サイトの<a href="../checklist.html">チェックリスト</a>の「実装のとき」を Markdown でコピーし、<code>.github/pull_request_template.md</code> に貼る。</p></div>
+</div>
+
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：レビューで言う一言</div>
+  <ul style="margin:0">
+    <li>「この値はサーバー側でも検証していますか？」（ルール 1）</li>
+    <li>「この SQL、プレースホルダにできますか？」「この <code>innerHTML</code>、textContent ではだめですか？」（ルール 2）</li>
+    <li>「このパスワード、bcrypt か Argon2 ですか？」（ルール 3）</li>
+    <li>「他の利用者の ID を入れたら、どこで弾かれますか？」（ルール 4）</li>
+    <li>「この鍵、環境変数に出せますか？」（ルール 5）</li>
+    <li>「この Cookie、HttpOnly と SameSite は付いていますか？」（ルール 6）</li>
+    <li>「lock ファイルは更新されていますか？ audit は通りましたか？」（ルール 7）</li>
+    <li>「このポート／このバケット、外から見える必要がありますか？」（ルール 8）</li>
+    <li>「このログ、トークンがそのまま出ていませんか？」（ルール 9）</li>
+    <li>「この機能、悪用されたら誰が何を失いますか？」（ルール 10）</li>
+  </ul>
+</div>
+
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「入力をエスケープしたから SQL は安全」→ エスケープ漏れが起きやすい。SQL は<b>プレースホルダ</b>が正解で、エスケープは HTML 出力のときの話。</li>
+    <li>「ハッシュ化しているから安全」→ MD5 や SHA-256 単体は高速に総当たりできる。パスワードには<b>bcrypt か Argon2</b>（わざと遅いハッシュ）。</li>
+    <li>「ログイン必須にしたから安全」→ それは認証。<b>認可</b>（誰がどのデータに）は別に要る。</li>
+    <li>「秘密を履歴から消したから大丈夫」→ 取られた前提で<b>ローテーション</b>が先。</li>
+  </ul>
+</div>
+
+<div class="table-wrap"><table>
+  <tr><th>ルール</th><th>詳しい章</th><th>チェックリストの項目</th></tr>
+  <tr><td>1 疑う</td><td><a href="03-injection-xss.html#validation">第3章 7.</a></td><td>実装 i1</td></tr>
+  <tr><td>2 つながない</td><td><a href="03-injection-xss.html">第3章</a></td><td>実装 i2〜i5</td></tr>
+  <tr><td>3 作らない</td><td><a href="04-auth-session.html#password">第4章 2.〜3.</a></td><td>設計 d2、実装 i7</td></tr>
+  <tr><td>4 確かめる</td><td><a href="04-auth-session.html#authz">第4章 6.</a></td><td>設計 d3、実装 i6</td></tr>
+  <tr><td>5 書かない</td><td><a href="05-crypto-secrets.html#secrets">第5章 5.〜6.</a></td><td>実装 i8</td></tr>
+  <tr><td>6 暗号化</td><td><a href="05-crypto-secrets.html#tls">第5章 2.</a>、<a href="04-auth-session.html#cookie">第4章 4.</a></td><td>リリース前 r1〜r2</td></tr>
+  <tr><td>7 最新に</td><td><a href="06-dependencies.html">第6章</a></td><td>リリース前 r4、運用 o1・o6</td></tr>
+  <tr><td>8 閉じる</td><td><a href="07-infra-cloud.html">第7章</a></td><td>設計 d4、リリース前 r5〜r6</td></tr>
+  <tr><td>9 残す</td><td><a href="08-operations-incident.html#logging">第8章 2.〜3.</a></td><td>設計 d6、実装 i9、運用 o3</td></tr>
+  <tr><td>10 乗せる</td><td><a href="09-secure-process.html">第9章</a></td><td>設計 d5、運用 o7</td></tr>
+</table></div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>10のルールを、4つのまとまりで言ってください。</summary><div class="a">入口を固める（疑う・つながない・作らない・確かめる）／宝を隠す（書かない・暗号化）／家を整える（最新に・閉じる）／見張る（残す・乗せる）。</div></details>
+  <details class="q"><summary>画面側で入力チェックをしていれば、サーバー側は省いてよいですか。</summary><div class="a">だめ。画面のチェックは操作ミス防止で、攻撃者は curl などで直接送る。サーバー側で型・長さ・範囲・許可リストを検証する。</div></details>
+  <details class="q"><summary>SQL・HTML・OS コマンドそれぞれで「文字列をつなげない」ための正解は？</summary><div class="a">SQL＝プレースホルダか ORM。HTML＝テンプレートの自動エスケープ（innerHTML や |safe を使わない）。OS コマンド＝呼ばない。呼ぶなら引数配列でシェルを経由しない。</div></details>
+  <details class="q"><summary>パスワードの保存に使ってよいハッシュと、だめなものは？</summary><div class="a">よい＝bcrypt、Argon2（わざと遅い）。だめ＝平文、MD5、SHA-1、SHA-256 単体（高速に総当たりされる）。</div></details>
+  <details class="q"><summary>認可の確認を「書き忘れても安全」にする構造は？確かめ方は？</summary><div class="a">確認を1か所（ミドルウェア・共通関数）にまとめ、許可がなければ拒否するデフォルト拒否にする。確かめ方は、利用者 A のまま利用者 B のデータ ID でアクセスし 403/404 になるか。</div></details>
+  <details class="q"><summary>API キーをコードに書いてしまい、リポジトリは非公開です。何が問題で、見つけたらまず何をしますか。</summary><div class="a">履歴に永久に残り、フォーク・CI ログ・退職者・公開への誤切替で漏れる。見つけたら消すより先に、無効化して新しい鍵に替える（ローテーション）。</div></details>
+  <details class="q"><summary>セッション Cookie に付ける3つの属性と、それぞれ何を防ぐか。</summary><div class="a">Secure（HTTP で送られるのを防ぐ）、HttpOnly（JavaScript から読まれる＝XSS で盗まれるのを防ぐ）、SameSite（他サイトから勝手に送られる＝CSRF を防ぐ）。</div></details>
+  <details class="q"><summary>部品を最新に保つための4つの手段は？</summary><div class="a">lock ファイルをコミットして版を確定／自動更新（Dependabot・Renovate）／スキャン（npm audit・pip-audit・Trivy）を CI に／EoL の前に上げる。</div></details>
+  <details class="q"><summary>「最小権限」と「デフォルト閉」とは？</summary><div class="a">最小権限＝その仕事に必要な権限だけを与える。デフォルト閉＝公開・許可は明示的に必要なものだけ開け、初期値は閉じる。</div></details>
+  <details class="q"><summary>ログに残すべきものと、残してはいけないものは？</summary><div class="a">残す＝ログイン成否・権限変更・削除・エクスポート・管理操作を「誰が・いつ・何に」の形で。残さない＝パスワード・カード番号・トークン・個人情報の本体。</div></details>
+  <details class="q"><summary>「明日からの3手」は？</summary><div class="a">今日：依存スキャンを1回回す。今週：秘密情報がリポジトリの履歴にないか検索する。今月：チェックリストを PR テンプレートに入れる。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+</body>
+</html>
