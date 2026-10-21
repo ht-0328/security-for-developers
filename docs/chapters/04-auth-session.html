@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>認証・セッション・認可の脆弱性 | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .ck-opts { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 8px 0; }
+  .ck-opts label { display: inline-flex; align-items: center; gap: 6px; font-size: .95rem; cursor: pointer; }
+  .ck-opts input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .ck-opts select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  .ck-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .ck-list li { border-radius: 10px; padding: 8px 12px; font-size: .9rem; line-height: 1.6; }
+  .ck-list li.on { background: var(--green-soft); color: var(--ink); }
+  .ck-list li.off { background: var(--red-soft); color: var(--ink); }
+  .ck-list li b { margin-right: 6px; }
+</style>
+</head>
+<body data-root="../" data-page="ch04">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第4章</div>
+<p><span class="badge impl">実装</span></p>
+<h1>第4章 認証・セッション・認可の脆弱性</h1>
+<p class="lead">「誰か」を確かめる認証、「さっきの人だ」を覚えておくセッション、「何をしてよいか」を決める認可。この3つは Web アプリの背骨で、どれか1つが抜けると全利用者のデータが危なくなります。この章では、パスワードの保存・総当たり対策・Cookie の属性・CSRF・認可の不備（OWASP Top 10:2025 の1位）・JWT の注意点を、危険なコードと安全なコードで見ていきます。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>認証はフレームワーク標準か認証サービスを使い、自作しない</b>
+      <ul>
+        <li>パスワードは <b>bcrypt か Argon2id</b> でハッシュして保存。平文・MD5・SHA-256 単体は高速に総当たりされる</li>
+        <li>ポリシーは長さ重視（8文字以上、15文字以上を推奨、上限は64文字以上）。記号の強制と定期変更の強要はしない（NIST SP 800-63B）。漏えいパスワードリストと照合する</li>
+        <li>失敗メッセージは「ID かパスワードが違います」に統一。リセットは推測できない使い捨てトークン＋短い有効期限</li>
+      </ul>
+    </li>
+    <li><b>総当たりとパスワードリスト攻撃にはレート制限と多要素認証</b>
+      <ul>
+        <li>アカウントロックだけだと「他人をロックする DoS」になる。遅延・CAPTCHA・IP とアカウント両方で制限</li>
+        <li>多要素認証：TOTP アプリは標準、パスキー（FIDO2）はフィッシング耐性あり、SMS は弱い。管理者は必須</li>
+      </ul>
+    </li>
+    <li><b>セッション ID はフレームワークに作らせ、ログイン成功時に再発行し、ログアウトでサーバー側で破棄する</b>。URL には入れない</li>
+    <li><b>Cookie には Secure・HttpOnly・SameSite=Lax を付ける</b>。<code>__Host-</code> プレフィックスでさらに固める
+      <ul>
+        <li>Secure：HTTP で送られない／HttpOnly：JavaScript から読めない（XSS で盗まれない）／SameSite：他サイトから勝手に送られない（CSRF）</li>
+      </ul>
+    </li>
+    <li><b>CSRF は「ブラウザが Cookie を自動で付ける」から起きる</b>。SameSite=Lax ＋ フレームワークの CSRF トークンで防ぎ、状態を変える操作は GET にしない</li>
+    <li><b>認可は毎回サーバーで確かめ、確認を1か所に集め、デフォルト拒否にする</b>（OWASP Top 10:2025 の1位）
+      <ul>
+        <li>IDOR：URL の ID を変えたら他人のデータ。クエリに所有者条件（<code>AND user_id = ?</code>）を含める</li>
+        <li>垂直の権限昇格：一般利用者が管理 API を叩ける。役割の確認をミドルウェアで</li>
+        <li>マスアサインメント：JSON に <code>is_admin: true</code> を混ぜる。受け取る項目を許可リストに</li>
+        <li>確かめ方：利用者 A のまま利用者 B の ID でアクセスし、403 か 404 になるか</li>
+      </ul>
+    </li>
+    <li><b>JWT・OAuth は自作せずライブラリに任せ、署名アルゴリズムと有効期限を必ず検証する</b>。トークンは localStorage に置かない（XSS で盗まれる）。短命＋リフレッシュ</li>
+    <li><b>クリックジャッキングは <code>frame-ancestors</code>、オープンリダイレクトは戻り先を相対パスか許可リストに</b></li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>認証・セッション・認可の関係</li>
+    <li>パスワードの扱い：保存・ポリシー・リセット</li>
+    <li>総当たり・パスワードリスト攻撃と多要素認証</li>
+    <li>セッション管理と Cookie の属性</li>
+    <li>CSRF</li>
+    <li>認可の不備：IDOR・権限昇格・マスアサインメント</li>
+    <li>OAuth 2.0 / OpenID Connect / JWT の注意</li>
+    <li>クリックジャッキングとオープンリダイレクト</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>パスワードを SHA-256 でハッシュして保存している。これで十分か。</li>
+    <li>「ログインに5回失敗したらアカウントを30分ロック」は、良い対策か。</li>
+    <li>JWT をブラウザの localStorage に保存して、毎回ヘッダーに付けて送る設計の弱点は何か。</li>
+  </ul>
+</div>
+
+<h2 id="overview">1. 認証・セッション・認可の関係</h2>
+<p>第1章で区別した3語を、1回のログインから操作までの流れで並べると次のようになります。それぞれに別の脆弱性があり、別の対策が要ります。</p>
+<div class="diagram">
+  <div class="dtitle">ログインから操作まで：3つの関門</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/people/user.svg" alt="">利用者<small>ID とパスワード</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/defense/fingerprint.svg" alt="">① 認証<small>誰かを確かめる</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/asset/cookie.svg" alt="">② セッション発行<small>Cookie に ID を入れて覚える</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/defense/badge-check.svg" alt="">③ 認可<small>毎リクエストで「してよいか」</small></div>
+    <div class="arr ok">→</div>
+    <div class="node"><img src="../assets/icons/asset/database.svg" alt="">データ</div>
+  </div>
+  <div class="cap">① が弱いと「他人としてログイン」される（パスワード・総当たり）。② が弱いと「ログインを飛ばしてなりすまし」される（セッション ID の窃取・固定化・CSRF）。③ が抜けると「ログインした人なら誰でも他人のデータ」になる（IDOR・権限昇格）。</div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>関門</th><th>主な脆弱性</th><th>主な対策</th><th>節</th></tr>
+  <tr><td><b>① 認証</b></td><td>弱いパスワード保存、総当たり、パスワードリスト攻撃、フィッシング</td><td>bcrypt／Argon2、レート制限、多要素認証</td><td>2〜3</td></tr>
+  <tr><td><b>② セッション</b></td><td>セッション ID の窃取（XSS・HTTP）、固定化、CSRF</td><td>Cookie 属性、再発行、CSRF トークン</td><td>4〜5</td></tr>
+  <tr><td><b>③ 認可</b></td><td>IDOR、垂直の権限昇格、マスアサインメント</td><td>一元化・デフォルト拒否・所有者条件</td><td>6</td></tr>
+</table></div>
+
+<h2 id="password">2. パスワードの扱い：保存・ポリシー・リセット</h2>
+<h3>保存：わざと遅いハッシュを使う</h3>
+<p><b>何が起きるか</b>：DB が漏えいしたとき（SQL インジェクション、バックアップの流出、内部不正）、パスワードが<b>平文</b>なら全員のパスワードがそのまま漏れます。<b>MD5 や SHA-256</b> でハッシュしていても、これらは高速に計算できるよう設計されているため、GPU で1秒間に数十億回の試行ができ、よくあるパスワードは短時間で元に戻されます。利用者はパスワードを使い回しているので、他のサービスでも被害が広がります。</p>
+<p><b>どう防ぐか</b>：パスワード専用の、<b>わざと遅く</b>設計されたハッシュ関数を使います。<span class="term" data-tip="bcrypt：パスワード保存用のわざと遅いハッシュ関数。コスト係数で遅さを調整でき、ソルトを自動で付ける。">bcrypt</span> か <span class="term" data-tip="Argon2id：パスワードハッシュのコンペで選ばれた関数。計算時間に加えてメモリも消費させ、GPU での総当たりを遅くする。">Argon2id</span> です。どちらも<span class="term" data-tip="ソルト：ハッシュの前にパスワードに付け足すランダムな値。同じパスワードでも違うハッシュになり、事前計算した表（レインボーテーブル）が使えなくなる。">ソルト</span>を自動で付け、結果の文字列に埋め込みます。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：高速なハッシュ・平文</div>
+<pre class="code"><code><span class="lang">Python</span>import hashlib
+<span class="c"># 平文はもちろん、これも不可。1秒に数十億回試せる</span>
+stored = <span class="hl">hashlib.sha256(password.encode()).hexdigest()</span>
+<span class="c"># 「ソルトを付けた SHA-256」も速さは変わらないので不十分</span></code></pre>
+<div class="why">速いハッシュは「改ざん検知」用で、パスワード用ではありません。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：bcrypt／Argon2id</div>
+<pre class="code"><code><span class="lang">Python（bcrypt）</span>import bcrypt
+hashed = <span class="ok">bcrypt.hashpw(password.encode(), bcrypt.gensalt())</span>   <span class="c"># 保存する値（$2b$...）</span>
+ok = <span class="ok">bcrypt.checkpw(password.encode(), hashed)</span>              <span class="c"># 照合</span></code></pre>
+<pre class="code"><code><span class="lang">Python（argon2-cffi）</span>from argon2 import PasswordHasher
+ph = PasswordHasher()
+hashed = <span class="ok">ph.hash(password)</span>        <span class="c"># $argon2id$...</span>
+ph.verify(hashed, password)        <span class="c"># 違えば例外</span></code></pre>
+<pre class="code"><code><span class="lang">JavaScript（bcrypt）</span>const hash = <span class="ok">await bcrypt.hash(password, 12)</span>;
+const ok = await bcrypt.compare(password, hash);</code></pre>
+<div class="why">フレームワーク標準の認証（Django の <code>make_password</code>、Rails の <code>has_secure_password</code>、Spring Security の <code>PasswordEncoder</code>）はこれを内蔵しています。自分で書くより、まず標準機能を使います。</div></div>
+</div>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：DB を見れば分かる</div>
+  <p>users テーブルのパスワード列が <code>$2b$12$…</code>（bcrypt）や <code>$argon2id$v=19$…</code>（Argon2）で始まっていれば OK。<b>64 文字の16進数</b>なら SHA-256 の疑い、<b>32 文字</b>なら MD5 の疑い、<b>読める文字</b>なら平文。これだけで既存システムの危険度が分かります。</p>
+</div>
+
+<h3>ポリシー：長さを重視し、無理な規則で弱くしない</h3>
+<p>米国 NIST の指針（SP 800-63B）は、現在は次の方針です。</p>
+<ul>
+  <li><b>長さ</b>：8文字以上を必須にし、15文字以上を推奨する。上限は少なくとも64文字（長いパスフレーズを許す）。</li>
+  <li><b>記号・大文字の強制はしない</b>：「P@ssw0rd」のような予測しやすい変形を生むだけ。</li>
+  <li><b>定期変更の強要はしない</b>：「末尾の数字を1つ増やす」運用を生む。漏えいの疑いがあるときに変更させる。</li>
+  <li><b>漏えいパスワードリストと照合する</b>：過去に流出したパスワードや「password123」のような常連は拒否する（Have I Been Pwned の Pwned Passwords API は、ハッシュの先頭5文字だけ送る方式で照合できる）。</li>
+  <li><b>貼り付けを禁止しない</b>：パスワードマネージャーの利用を妨げない。</li>
+</ul>
+
+<h3>リセットと失敗メッセージ：存在を悟らせない</h3>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例</div>
+<pre class="code"><code><span class="lang">擬似コード</span>if not user:
+    return <span class="hl">"このメールアドレスは登録されていません"</span>
+if not check(password):
+    return <span class="hl">"パスワードが違います"</span>
+<span class="c"># リセット用トークン</span>
+token = <span class="hl">str(user.id) + str(int(time.time()))</span>   <span class="c"># 推測できる</span></code></pre>
+<div class="why">メッセージの違いで「どのメールアドレスが登録済みか」が分かり、総当たりの的が絞れます。推測できるトークンは他人のパスワードを書き換えられます。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例</div>
+<pre class="code"><code><span class="lang">Python</span>import secrets, hashlib
+from datetime import datetime, timedelta
+<span class="c"># 失敗の理由は区別しない</span>
+if not user or not bcrypt.checkpw(pw, user.pw_hash):
+    return <span class="ok">"ID かパスワードが違います"</span>
+
+<span class="c"># リセット：推測不能・使い捨て・短命。DB にはハッシュを保存</span>
+token = <span class="ok">secrets.token_urlsafe(32)</span>
+save(user.id, hashlib.sha256(token.encode()).hexdigest(), expires=datetime.now() + timedelta(minutes=30))
+send_mail(user.email, f"https://example.com/reset?token={token}")</code></pre>
+<div class="why">リセット依頼の応答も「登録があればメールを送りました」に統一します。トークンは1回使ったら無効化し、使用時に古いセッションも全部破棄します。</div></div>
+</div>
+
+<h2 id="bruteforce">3. 総当たり・パスワードリスト攻撃と多要素認証</h2>
+<h3>何が起きるか</h3>
+<p><b>総当たり（ブルートフォース）</b>は、1つのアカウントに対して多数のパスワードを試す攻撃です。<b>パスワードリスト攻撃（クレデンシャルスタッフィング）</b>は、他のサービスから漏れた「ID とパスワードの組」のリストを、そのまま自分のサイトに試す攻撃です。利用者の多くがパスワードを使い回しているため、<b>正しいパスワードで1回目に成功</b>します。ニュースの「不正ログイン〇万件」の多くはこれです。</p>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>
+  <p>「〇〇で<b>不正ログイン</b>が発生し、<b>ポイント〇万円分が不正利用</b>された。<b>他社から流出した ID とパスワードを使ったパスワードリスト攻撃</b>とみられる。同社のシステムからの漏えいは確認されていない」。読み方：<b>利用者側</b>の対策は使い回しをやめ、多要素認証を有効にすること。<b>開発者側</b>の課題は、1回目で成功するログインを止めるのは難しいので、多要素認証の提供、いつもと違う端末・場所からのログイン通知、漏えいパスワードとの照合、で被害を限定することです。</p>
+</div>
+
+<h3>どう防ぐか：レート制限</h3>
+<ul>
+  <li><b>アカウント単位</b>：同じ ID への失敗が続いたら、回数に応じて待ち時間を伸ばす（1秒 → 2秒 → 4秒 …）、または CAPTCHA を出す。</li>
+  <li><b>IP 単位</b>：同じ送信元から多数の ID への試行を制限する（パスワードリスト攻撃は ID を変えて来る）。</li>
+  <li><b>通知</b>：失敗の急増をアラートに（<a href="08-operations-incident.html#monitoring">第8章</a>）、新しい端末からのログイン成功を利用者にメールで知らせる。</li>
+</ul>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点：「5回失敗で30分ロック」の罠</div>
+  <p>固定回数での完全ロックは、攻撃者がわざと失敗して<b>他人をロックアウトする</b>（サービス妨害）道具になります。管理者アカウントの ID が推測できれば、管理者を締め出せます。完全ロックではなく、<b>遅延・CAPTCHA・本人への通知</b>を組み合わせ、ロックするなら一時的で本人が解除できる形にします。</p>
+</div>
+
+<h3 id="mfa">多要素認証（MFA）</h3>
+<p>パスワード（知っているもの）に、もう1つ別の種類の要素（持っているもの・本人の特徴）を組み合わせます。パスワードが漏れても、それだけではログインできなくなります。</p>
+<div class="table-wrap"><table>
+  <tr><th>方式</th><th>強さ</th><th>備考</th></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/smartphone.svg" alt=""><b>認証アプリ（TOTP）</b></td><td>標準</td><td>30秒ごとに変わる6桁の数字。Google Authenticator 等。実装はライブラリ（pyotp、otplib）で。</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/defense/key-round.svg" alt=""><b>パスキー／セキュリティキー（FIDO2・WebAuthn）</b></td><td>最も強い</td><td>サイトのドメインに紐づく鍵で署名するため、<b>偽サイトでは使えない（フィッシング耐性）</b>。管理者に向く。</td></tr>
+  <tr><td><img class="ico-s" src="../assets/icons/asset/mail.svg" alt=""><b>SMS・メールのコード</b></td><td>弱い</td><td>SIM の乗っ取りや、偽サイトでコードを中継するフィッシングで突破される。無いよりは良い。</td></tr>
+</table></div>
+<p><b>管理者と、金銭・個人情報に触れる操作には必須</b>にします。一般利用者には提供して有効化を促し、バックアップコードを用意します。自作せず、フレームワークのプラグインか認証サービスを使います。</p>
+
+<h2 id="session">4. セッション管理と Cookie の属性</h2>
+<h3>セッション ID の扱い</h3>
+<p>ログイン後、サーバーは「この人は認証済み」を覚えるために<span class="term" data-tip="セッション ID：ログイン中の利用者を識別する、推測できないランダムな文字列。Cookie に入れて毎回送られる。">セッション ID</span> を発行し、Cookie に入れます。以降のリクエストは、この ID だけで本人と見なされます。つまり<b>セッション ID を盗まれる＝パスワードなしでなりすまされる</b>です。</p>
+<div class="table-wrap"><table>
+  <tr><th>決まり</th><th>なぜ</th></tr>
+  <tr><td><b>ID はフレームワークに生成させる</b></td><td>十分に長く（128 ビット以上）推測不能な乱数が要る。<code>user_id + 時刻</code> のような自作は推測される。</td></tr>
+  <tr><td><b>ログイン成功時に ID を再発行する</b></td><td>攻撃者が事前に用意した ID を被害者に使わせ、ログイン後にその ID でなりすます「セッション固定化」を防ぐ。Django は自動、Express は <code>req.session.regenerate()</code>、PHP は <code>session_regenerate_id(true)</code>。</td></tr>
+  <tr><td><b>ログアウトはサーバー側で破棄する</b></td><td>Cookie を消すだけでは、盗まれた ID がまだ有効。サーバーのセッションストアから削除する。</td></tr>
+  <tr><td><b>有効期限を付ける</b></td><td>無操作で一定時間（例：30分〜数時間）、絶対時間（例：数日）で失効させる。</td></tr>
+  <tr><td><b>URL に入れない</b></td><td><code>?sessionid=…</code> はブラウザ履歴・Referer・ログに残り、漏れる。</td></tr>
+  <tr><td><b>パスワード変更・権限変更時に他のセッションを破棄する</b></td><td>乗っ取られた後に本人がパスワードを変えても、攻撃者のセッションが残っていては意味がない。</td></tr>
+</table></div>
+
+<h3 id="cookie">Cookie の属性</h3>
+<p>セッション ID を入れる Cookie には、必ず次の属性を付けます。</p>
+<pre class="code"><code><span class="lang">HTTP 応答ヘッダー</span>Set-Cookie: __Host-session=7f3a…; Path=/; Secure; HttpOnly; SameSite=Lax</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>属性</th><th>効果</th><th>外すと</th></tr>
+  <tr><td><b>Secure</b></td><td>HTTPS のときだけ送る</td><td>HTTP のリンクを踏ませるだけで、経路上から ID が盗める</td></tr>
+  <tr><td><b>HttpOnly</b></td><td>JavaScript（<code>document.cookie</code>）から読めない</td><td>XSS が1つあれば ID が盗まれ、なりすまされる</td></tr>
+  <tr><td><b>SameSite=Lax</b></td><td>他サイトからのリクエストには原則付けない（他サイトからのリンクを<b>クリック</b>して来た GET にだけ付く）</td><td>他サイトに置かれたフォームから勝手に送信される（CSRF）。<code>Strict</code> は外部リンクから来てもログイン状態にならない厳格版</td></tr>
+  <tr><td><b>Path=/</b></td><td>サイト全体で有効</td><td>—</td></tr>
+  <tr><td><b><code>__Host-</code> プレフィックス</b></td><td>名前の約束。Secure 必須・Domain 指定なし・Path=/ をブラウザが強制する</td><td>サブドメインから上書きされる余地が残る</td></tr>
+  <tr><td><b>Domain（指定しない）</b></td><td>指定しなければそのホストだけ</td><td><code>Domain=example.com</code> と書くと全サブドメインに送られ、1つのサブドメインの穴で盗まれる</td></tr>
+</table></div>
+
+<div class="box">
+  <div class="box-title"><span class="em">🧪</span>体験：Cookie 属性ビルダー</div>
+  <p class="muted" style="margin-top:0">属性を付け外しすると、<code>Set-Cookie</code> ヘッダーの例と、守れていること・危ないことが変わります。</p>
+  <div class="ck-opts">
+    <label><input type="checkbox" id="ck-secure" checked> Secure</label>
+    <label><input type="checkbox" id="ck-httponly" checked> HttpOnly</label>
+    <label>SameSite
+      <select id="ck-samesite"><option value="Lax" selected>Lax</option><option value="Strict">Strict</option><option value="None">None</option><option value="">（指定しない）</option></select>
+    </label>
+    <label><input type="checkbox" id="ck-host" checked> <code>__Host-</code> プレフィックス</label>
+  </div>
+  <div class="out" id="ck-header"></div>
+  <ul class="ck-list" id="ck-list"></ul>
+</div>
+
+<div class="compare">
+  <div class="ok"><div class="lbl">✓ Express（express-session）</div>
+<pre class="code"><code><span class="lang">JavaScript</span>app.use(session({
+  name: "__Host-session",
+  secret: process.env.SESSION_SECRET,
+  resave: false, saveUninitialized: false,
+  cookie: { <span class="ok">secure: true, httpOnly: true, sameSite: "lax"</span>, maxAge: 60 * 60 * 1000 },
+}));</code></pre>
+<div class="why">本番はリバースプロキシの後ろにいることが多いので <code>app.set("trust proxy", 1)</code> も必要です。</div></div>
+  <div class="ok"><div class="lbl">✓ Flask / Django の設定</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>app.config.update(
+    <span class="ok">SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax"</span>,
+)</code></pre>
+<pre class="code"><code><span class="lang">Python（Django settings.py）</span>SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = "Lax"   <span class="c"># HttpOnly は既定で True</span></code></pre>
+<div class="why">フレームワークは属性を設定1つで付けられます。確かめ方は、ブラウザの開発者ツール → アプリケーション → Cookie。</div></div>
+</div>
+
+<h2 id="csrf">5. CSRF（クロスサイトリクエストフォージェリ）</h2>
+<h3>何が起きるか</h3>
+<p>利用者が銀行サイトにログインしたまま、攻撃者のページを開いたとします。攻撃者のページには、銀行の送金 URL に向けて自動送信されるフォームが仕込まれています。ブラウザは<b>銀行の Cookie を自動で付けて</b>送信するので、銀行から見ると「本人からの正規の送金依頼」に見えます。利用者は何も操作していないのに、送金・メールアドレス変更・パスワード変更・投稿が行われる。これが <span class="term" data-tip="CSRF（Cross-Site Request Forgery）：ログイン中の利用者のブラウザに、別サイトから意図しないリクエストを送らせる攻撃。">CSRF</span> です。</p>
+<div class="diagram">
+  <div class="dtitle">CSRF：ブラウザが Cookie を自動で付けることを悪用する</div>
+  <div class="grp-row">
+    <div class="grp internet"><div class="glabel"><img src="../assets/icons/threat/skull.svg" alt=""><span class="gtxt">攻撃者のサイト</span></div>
+      <div class="flow"><div class="node sm"><img src="../assets/icons/asset/file-code.svg" alt="">自動送信フォーム<small>action=銀行の送金 URL</small></div></div>
+    </div>
+    <div class="grp plain"><div class="glabel"><img src="../assets/icons/people/user.svg" alt=""><span class="gtxt">被害者のブラウザ</span></div>
+      <div class="flow"><div class="node sm"><img src="../assets/icons/asset/cookie.svg" alt="">銀行の Cookie<small>ログイン中</small></div></div>
+    </div>
+    <div class="grp trusted"><div class="glabel"><img src="../assets/icons/people/landmark.svg" alt=""><span class="gtxt">銀行</span></div>
+      <div class="flow"><div class="node sm"><img src="../assets/icons/asset/server.svg" alt="">送金処理<small>Cookie が正しいので実行</small></div></div>
+    </div>
+  </div>
+  <div class="cap">攻撃者は Cookie の中身を知る必要がありません。「被害者のブラウザに送らせる」だけで成立します。</div>
+</div>
+
+<h3>どう防ぐか</h3>
+<ul>
+  <li><b>SameSite=Lax</b>（前節）：他サイトからの POST には Cookie が付かなくなるので、これだけで大半の CSRF が止まります。Chrome などは未指定でも Lax 扱いにしますが、ブラウザによって挙動が違うので<b>明示的に付けます</b>。</li>
+  <li><b>CSRF トークン</b>：フォームごとに推測できない値を埋め込み、サーバーで照合する。<b>フレームワークの機能を使う</b>（Django の <code>CsrfViewMiddleware</code> と <code>{% csrf_token %}</code>、Rails の <code>protect_from_forgery</code>、Spring Security は既定で有効、Flask は Flask-WTF、Express は csrf-csrf などのミドルウェア）。SameSite と二重にしておくのが標準です。</li>
+  <li><b>状態を変える操作を GET にしない</b>：<code>GET /delete?id=1</code> は、<code>&lt;img src="…"&gt;</code> を踏ませるだけで実行されます。削除・変更・送金は POST／PUT／DELETE に。</li>
+  <li><b>Origin／Referer ヘッダーの検証</b>は補助。欠けている場合の扱いが難しいので、単独の対策にしない。</li>
+</ul>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点</div>
+  <ul style="margin:0">
+    <li>「Cookie ではなく <code>Authorization: Bearer …</code> ヘッダーでトークンを送る API なら、ブラウザが自動で付けないので CSRF は基本起きない」。ただしそのトークンを localStorage に置くと、今度は XSS で盗まれます（7節）。</li>
+    <li>「JSON の API だから CSRF は無い」とは限らない。<code>Content-Type</code> の確認が無いと、フォームから <code>text/plain</code> で JSON らしき文字列を送られることがある。CORS のプリフライトが働く独自ヘッダーを必須にするか、トークンを使う。</li>
+  </ul>
+</div>
+
+<h2 id="authz">6. 認可の不備：IDOR・権限昇格・マスアサインメント</h2>
+<p>OWASP Top 10:2025 の<b>1位</b>は「アクセス制御の不備」です。認証（ログイン）は多くのアプリにありますが、<b>「この人がこの対象にこの操作をしてよいか」</b>の確認は、画面ごと・API ごとに人が書く必要があり、抜けやすい。自動ツールではほぼ見つけられず、設計とレビューで防ぐしかありません。</p>
+
+<h3 id="idor">データ単位：IDOR（他人の ID で参照）</h3>
+<p><b>何が起きるか</b>：<code>GET /api/orders/1001</code> で自分の注文が見える。<code>1002</code> に変えたら他人の注文が見えた。請求書・診療記録・履歴書・メッセージ、どれでも同じです。<span class="term" data-tip="IDOR（Insecure Direct Object Reference）：ID を直接指定できる参照で、所有者の確認が抜けている脆弱性。">IDOR</span> と呼びます。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：ログイン確認だけ</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>@app.get("/api/orders/&lt;int:order_id&gt;")
+@login_required
+def get_order(order_id):
+    row = db.execute(
+        <span class="hl">"SELECT * FROM orders WHERE id = ?"</span>, (order_id,)
+    ).fetchone()
+    return jsonify(row)</code></pre>
+<div class="why">ログインは確認しているが、「その注文はこの人のものか」を見ていない。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：所有者条件をクエリに含める</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>@app.get("/api/orders/&lt;int:order_id&gt;")
+@login_required
+def get_order(order_id):
+    row = db.execute(
+        <span class="ok">"SELECT * FROM orders WHERE id = ? AND user_id = ?"</span>,
+        (order_id, <span class="ok">current_user.id</span>),
+    ).fetchone()
+    if row is None:
+        abort(404)   <span class="c"># 「無い」と「他人の」を区別して教えない</span>
+    return jsonify(row)</code></pre>
+<div class="why">所有者の条件を<b>取得クエリそのもの</b>に含めると、取得後の if 文の書き忘れが起きません。ORM なら <code>current_user.orders.get(id)</code> のように関連から引きます。</div></div>
+</div>
+
+<h3>機能単位：垂直の権限昇格</h3>
+<p>一般利用者が <code>POST /api/admin/users/5/disable</code> を直接叩けてしまう。画面に管理メニューが無いだけで、API には役割の確認が無い。対策は、<b>役割の確認をミドルウェアや共通デコレータに集め、ルートごとに宣言する</b>ことです。</p>
+<pre class="code"><code><span class="lang">JavaScript（Express）</span>function requireRole(role) {
+  return (req, res, next) =&gt; {
+    if (!req.user) return res.sendStatus(401);
+    if (!req.user.roles.includes(role)) return res.sendStatus(403);
+    next();
+  };
+}
+app.post("/api/admin/users/:id/disable", <span class="ok">requireRole("admin")</span>, disableUser);
+<span class="c">// 既定を「認証必須」にしておき、公開ルートだけ明示的に例外にする（デフォルト拒否）</span></code></pre>
+
+<h3>項目単位：マスアサインメント</h3>
+<p>プロフィール更新 API が、受け取った JSON をそのままモデルに流し込んでいると、<code>{"name": "taro", <b>"is_admin": true</b>}</code> を送るだけで管理者になれます。<b>受け取る項目を許可リストで決める</b>（pydantic／zod のスキーマで余分な項目を捨てる、Rails の Strong Parameters、Django のフォームの <code>fields</code>）。</p>
+
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：認可の3原則「一元・拒否・所有」</div>
+  <ol style="margin:0">
+    <li><b>一元化</b>：確認処理を1か所（ミドルウェア・共通関数）に集める。あちこちに if 文を書くと必ず抜ける。</li>
+    <li><b>デフォルト拒否</b>：許可を書いていないルートは拒否される構造にする。「書き忘れたら通る」は逆。</li>
+    <li><b>所有者条件</b>：データを引くクエリに <code>user_id = ?</code> を含める。取得してから確認、ではなく。</li>
+  </ol>
+  <p>UUID や長いランダム ID は「推測されにくい」だけで認可の代わりにはなりません。ID はどこかで漏れます（ログ、画面、共有）。</p>
+</div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：確かめ方と設計の表</div>
+  <ul style="margin:0">
+    <li><b>確かめ方</b>：利用者 A でログインしたまま、利用者 B のデータの ID を URL・API に入れる。403 か 404 なら OK。200 で中身が返れば IDOR。一般利用者のセッションで管理 API を叩き、403 になるか。これを自動テストに入れる。</li>
+    <li><b>設計の表</b>：設計時に「役割 × 対象 × 操作」の表を作る（例：一般利用者は自分の注文を参照・取消できる、管理者は全注文を参照できるが取消は不可）。表に無い組み合わせは拒否。チェックリスト「設計 d3」。</li>
+    <li><b>レビューで言う一言</b>：「他の利用者の ID を入れたら、どこで弾かれますか？」</li>
+  </ul>
+</div>
+
+<h2 id="jwt">7. OAuth 2.0 / OpenID Connect / JWT の注意</h2>
+<p>「Google でログイン」などの外部認証は <span class="term" data-tip="OAuth 2.0：利用者の許可のもとで、別サービスの API を使う権限（アクセストークン）を安全に受け渡す仕組み。">OAuth 2.0</span> と <span class="term" data-tip="OpenID Connect（OIDC）：OAuth 2.0 の上に「本人確認（ID トークン）」を足した仕組み。「〇〇でログイン」はこれ。">OpenID Connect</span>、API のトークンには <span class="term" data-tip="JWT（JSON Web Token）：ヘッダー・本文・署名を . でつないだトークン。中身は誰でも読めるが、署名で改ざんを検知できる。">JWT</span> がよく使われます。<b>どれも自作せず、実績のあるライブラリか認証サービスに任せる</b>のが前提で、そのうえで次の点を押さえます。</p>
+<div class="table-wrap"><table>
+  <tr><th>注意点</th><th>何が起きるか</th><th>対策</th></tr>
+  <tr><td><b>署名を検証していない／<code>alg: none</code></b></td><td>ヘッダーの <code>alg</code> を <code>none</code> にした署名なしトークンや、公開鍵を HMAC の鍵として使わせる混同攻撃で、任意の中身が通る</td><td>検証時に<b>許可するアルゴリズムを固定</b>する。PyJWT <code>jwt.decode(t, key, algorithms=["RS256"])</code>、jsonwebtoken <code>jwt.verify(t, key, { algorithms: ["RS256"] })</code></td></tr>
+  <tr><td><b><code>exp</code>（有効期限）を見ていない</b></td><td>一度漏れたトークンが永久に使える</td><td><code>exp</code>・<code>iss</code>・<code>aud</code> をライブラリに検証させる</td></tr>
+  <tr><td><b>localStorage に保存</b></td><td>XSS が1つあればトークンを全部盗まれる</td><td>HttpOnly Cookie に入れる（この場合は CSRF 対策とセット）か、メモリ上に短命のアクセストークン＋HttpOnly Cookie のリフレッシュトークン</td></tr>
+  <tr><td><b>失効できない</b></td><td>JWT はサーバーに状態が無いので、ログアウトや乗っ取り時に即無効化できない</td><td>アクセストークンは短命（5〜15分）、リフレッシュトークンはサーバー側で管理し、使うたびに再発行（ローテーション）して失効できるようにする</td></tr>
+  <tr><td><b>中身に秘密を入れる</b></td><td>JWT は Base64 で<b>誰でも読める</b></td><td>パスワードや個人情報を入れない。入れてよいのは利用者 ID・役割・期限</td></tr>
+  <tr><td><b>OAuth の <code>state</code> を使わない</b></td><td>ログインフローへの CSRF（攻撃者のアカウントにログインさせられる）</td><td><code>state</code> を毎回生成して照合。公開クライアント（SPA・モバイル）は PKCE を使う</td></tr>
+  <tr><td><b>リダイレクト URI の部分一致</b></td><td>認可コードが攻撃者のサイトに送られる</td><td>登録した URI と<b>完全一致</b>だけ許可する（認可サーバー側の設定）</td></tr>
+</table></div>
+
+<h2 id="clickjacking">8. クリックジャッキングとオープンリダイレクト</h2>
+<h3>クリックジャッキング</h3>
+<p><b>何が起きるか</b>：攻撃者のページに、あなたのサイトを透明な <code>&lt;iframe&gt;</code> で重ねます。利用者は「プレゼントを受け取る」ボタンを押したつもりで、透明な下のあなたのサイトの「削除」「公開」「送金」ボタンを押しています。<b>対策</b>は、自分のページを他サイトの iframe に入れさせないこと。CSP の <code>frame-ancestors</code>（第3章 5節）か、古いブラウザ向けに <code>X-Frame-Options</code> を付けます。</p>
+<pre class="code"><code><span class="lang">HTTP 応答ヘッダー</span>Content-Security-Policy: frame-ancestors 'none'   <span class="c"># 自分のサイト内で iframe を使うなら 'self'</span>
+X-Frame-Options: DENY                               <span class="c"># 古いブラウザ向けの保険</span></code></pre>
+
+<h3 id="redirect">オープンリダイレクト</h3>
+<p><b>何が起きるか</b>：ログイン後の戻り先を <code>?next=</code> で受け取る機能で、<code>?next=https://evil.example/login</code> を渡され、<b>正規のドメインのリンク</b>から偽サイトに飛ばされます。フィッシングの信頼性を上げる道具になり、OAuth のリダイレクトと組み合わさるとトークンの窃取にもつながります。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>next_url = request.args.get("next", "/")
+return redirect(<span class="hl">next_url</span>)   <span class="c"># 外部 URL も //evil.example も通る</span></code></pre>
+<div class="why"><code>//evil.example</code> のようにスキームを省いた形でも外部に飛ぶので、「http で始まらない」の確認では不十分です。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：相対パスだけ、または許可リスト</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>from urllib.parse import urlparse
+next_url = request.args.get("next", "/")
+p = urlparse(next_url)
+<span class="ok">if p.scheme or p.netloc or not next_url.startswith("/") or next_url.startswith("//"):</span>
+    next_url = "/"
+return redirect(next_url)
+<span class="c"># Django なら url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()})</span></code></pre>
+<div class="why">戻り先は「自サイト内の相対パス」だけ許可するのが最も簡単です。外部に飛ばす必要があるなら、飛ばしてよいホストを列挙します。</div></div>
+</div>
+
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典・さらに読む</div>
+  <ul style="margin:0">
+    <li>OWASP Cheat Sheet：<a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html">Authentication</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html">Password Storage</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">Session Management</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">CSRF Prevention</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">Authorization</a></li>
+    <li>NIST <a href="https://pages.nist.gov/800-63-4/sp800-63b.html">SP 800-63B</a>（Digital Identity Guidelines：パスワードの長さ・複雑さ・定期変更の方針）</li>
+    <li>MDN「<a href="https://developer.mozilla.org/ja/docs/Web/HTTP/Headers/Set-Cookie">Set-Cookie</a>」（日本語）</li>
+    <li>IPA「<a href="https://www.ipa.go.jp/security/vuln/websecurity.html">安全なウェブサイトの作り方</a>」：セッション管理の不備、CSRF、クリックジャッキング、パスワードリスト攻撃対策</li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>ソルト</dt><dd>ハッシュの前にパスワードに付け足すランダムな値。同じパスワードでも違うハッシュになり、事前計算した表が使えなくなる。bcrypt・Argon2 は自動で付ける。</dd>
+    <dt>クレデンシャルスタッフィング</dt><dd>パスワードリスト攻撃。他サービスから漏れた ID・パスワードの組をそのまま試す。使い回しが原因で1回目に成功する。</dd>
+    <dt>TOTP</dt><dd>時刻に基づくワンタイムパスワード。認証アプリに表示される30秒ごとに変わる6桁の数字。</dd>
+    <dt>パスキー</dt><dd>FIDO2／WebAuthn に基づく、パスワードを使わない認証。サイトのドメインに紐づく鍵で署名するので偽サイトでは使えない。</dd>
+    <dt>セッション固定化</dt><dd>攻撃者が用意したセッション ID を被害者に使わせ、ログイン後にその ID でなりすます攻撃。ログイン時の ID 再発行で防ぐ。</dd>
+    <dt>PKCE</dt><dd>OAuth 2.0 で、認可コードを横取りされても使えないようにする仕組み。SPA・モバイルアプリでは必須。</dd>
+    <dt>リフレッシュトークン</dt><dd>短命のアクセストークンを再発行するための長命のトークン。サーバー側で管理し、使うたびに新しいものに替える。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>認証・セッション・認可の3つの関門が、それぞれ弱いと何が起きるか。</summary><div class="a">認証が弱い→他人としてログインされる。セッションが弱い→ログインを飛ばしてなりすまされる（ID 窃取・固定化・CSRF）。認可が抜ける→ログインした人なら誰でも他人のデータ（IDOR・権限昇格）。</div></details>
+  <details class="q"><summary>パスワードを SHA-256 でハッシュして保存するのはなぜ不十分か。何を使うか。</summary><div class="a">SHA-256 は高速に計算できるため GPU で1秒に数十億回試せる。わざと遅い bcrypt か Argon2id を使う（ソルトは自動）。</div></details>
+  <details class="q"><summary>NIST SP 800-63B に沿ったパスワードポリシーを4つ。</summary><div class="a">長さ重視（8文字以上、15文字以上推奨、上限64文字以上）／記号・大文字の強制はしない／定期変更の強要はしない／漏えいパスワードリストと照合する。</div></details>
+  <details class="q"><summary>ログイン失敗とパスワードリセットのメッセージはどうあるべきか。リセットトークンの条件は？</summary><div class="a">「ID かパスワードが違います」「登録があればメールを送りました」に統一し、アカウントの有無を悟らせない。トークンは推測不能（secrets.token_urlsafe）・使い捨て・短命で、DB にはハッシュを保存。</div></details>
+  <details class="q"><summary>「5回失敗で30分ロック」の問題と、代わりの対策は？</summary><div class="a">わざと失敗して他人を締め出すサービス妨害の道具になる。遅延の増加・CAPTCHA・本人への通知・IP とアカウント両方での制限を組み合わせる。</div></details>
+  <details class="q"><summary>多要素認証の3方式を強い順に。最も強い方式がフィッシングに強い理由は？</summary><div class="a">パスキー／セキュリティキー（FIDO2）＞ 認証アプリ（TOTP）＞ SMS・メール。パスキーはサイトのドメインに紐づく鍵で署名するため、偽サイトでは使えない。</div></details>
+  <details class="q"><summary>セッション ID の扱いで守る決まりを4つ。</summary><div class="a">フレームワークに生成させる／ログイン成功時に再発行（固定化対策）／ログアウトはサーバー側で破棄／有効期限を付け URL に入れない。</div></details>
+  <details class="q"><summary>Cookie の Secure・HttpOnly・SameSite はそれぞれ何を防ぐか。<code>__Host-</code> は何か。</summary><div class="a">Secure＝HTTP で送られるのを防ぐ。HttpOnly＝JavaScript から読まれる（XSS での窃取）のを防ぐ。SameSite＝他サイトから勝手に送られる（CSRF）のを防ぐ。__Host- は Secure 必須・Domain なし・Path=/ をブラウザが強制する名前の約束。</div></details>
+  <details class="q"><summary>CSRF が起きる理由と、防ぐ方法3つ。</summary><div class="a">ブラウザが Cookie を自動で付けるから。SameSite=Lax、フレームワークの CSRF トークン、状態を変える操作を GET にしない。</div></details>
+  <details class="q"><summary>IDOR とは何か。クエリでの防ぎ方と確かめ方は？</summary><div class="a">ID を変えたら他人のデータが見える認可の不備。取得クエリに所有者条件（AND user_id = ?）を含める。確かめ方は利用者 A のまま利用者 B の ID でアクセスし 403/404 になるか。</div></details>
+  <details class="q"><summary>認可の3原則は？UUID は認可の代わりになるか。</summary><div class="a">一元化（ミドルウェアに集める）・デフォルト拒否（許可を書いていなければ拒否）・所有者条件（クエリに含める）。UUID は推測されにくいだけで、認可の代わりにならない。</div></details>
+  <details class="q"><summary>JWT を使うときの注意を4つ。</summary><div class="a">検証時にアルゴリズムを固定（alg none・鍵混同対策）／exp・iss・aud を検証／localStorage に置かない（XSS）→ HttpOnly Cookie か短命＋リフレッシュ／中身は誰でも読めるので秘密を入れない。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+<script>
+(function () {
+  // Cookie 属性ビルダー：属性の組み合わせ → Set-Cookie 例と、守れていること・危ないこと
+  var secure = document.getElementById("ck-secure"), httponly = document.getElementById("ck-httponly");
+  var samesite = document.getElementById("ck-samesite"), host = document.getElementById("ck-host");
+  var header = document.getElementById("ck-header"), list = document.getElementById("ck-list");
+  function render() {
+    var name = (host.checked ? "__Host-" : "") + "session";
+    var parts = [name + "=7f3a9c…", "Path=/"];
+    if (secure.checked) parts.push("Secure");
+    if (httponly.checked) parts.push("HttpOnly");
+    if (samesite.value) parts.push("SameSite=" + samesite.value);
+    header.textContent = "Set-Cookie: " + parts.join("; ");
+    var items = [];
+    items.push(secure.checked
+      ? { on: true, t: "Secure", d: "HTTPS のときだけ送られる。経路上で盗まれない。" }
+      : { on: false, t: "Secure なし", d: "HTTP のリンクを1回踏ませるだけで、同じネットワークや経路上からセッション ID が盗める。" });
+    items.push(httponly.checked
+      ? { on: true, t: "HttpOnly", d: "document.cookie から読めない。XSS があってもセッション ID はそのまま盗まれない。" }
+      : { on: false, t: "HttpOnly なし", d: "XSS が1つあれば JavaScript でセッション ID を読まれ、なりすまされる。" });
+    if (samesite.value === "Strict") items.push({ on: true, t: "SameSite=Strict", d: "他サイトからのリクエストには一切付かない。CSRF を防ぐが、外部リンクから来た直後はログイン状態に見えない。" });
+    else if (samesite.value === "Lax") items.push({ on: true, t: "SameSite=Lax", d: "他サイトからの POST などには付かない（リンクをクリックして来た GET だけ付く）。CSRF の大半を防ぎ、使い勝手も保てる標準の選択。" });
+    else if (samesite.value === "None") items.push({ on: false, t: "SameSite=None", d: "他サイトからのリクエストにも付く。CSRF 対策はトークンだけが頼りになる。Secure が必須（無いとブラウザが拒否する）。iframe で他サイトに埋め込まれる用途以外では選ばない。" });
+    else items.push({ on: false, t: "SameSite 未指定", d: "多くのブラウザは Lax 扱いにするが、挙動が揃っていない。明示的に Lax か Strict を付ける。" });
+    items.push(host.checked
+      ? { on: true, t: "__Host- プレフィックス", d: "Secure 必須・Domain 指定なし・Path=/ をブラウザが強制する。サブドメインからの上書きができない。" }
+      : { on: false, t: "プレフィックスなし", d: "サブドメイン（例：blog.example.com）に穴があると、そこから同名の Cookie を上書きされる余地が残る。" });
+    if (host.checked && !secure.checked) items.push({ on: false, t: "矛盾", d: "__Host- は Secure が必須。この組み合わせはブラウザに拒否され、Cookie が保存されない。" });
+    if (samesite.value === "None" && !secure.checked) items.push({ on: false, t: "矛盾", d: "SameSite=None は Secure が必須。この組み合わせはブラウザに拒否される。" });
+    list.innerHTML = "";
+    items.forEach(function (it) {
+      var li = document.createElement("li");
+      li.className = it.on ? "on" : "off";
+      var b = document.createElement("b"); b.textContent = (it.on ? "✓ " : "✗ ") + it.t;
+      li.appendChild(b); li.appendChild(document.createTextNode(it.d));
+      list.appendChild(li);
+    });
+  }
+  [secure, httponly, samesite, host].forEach(function (el) { el.addEventListener("change", render); });
+  render();
+})();
+</script>
+</body>
+</html>

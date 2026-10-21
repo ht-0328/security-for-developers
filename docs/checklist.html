@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発者のチェックリスト | 開発者のためのセキュリティ入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+  .toolbar .field { flex: 1; min-width: 200px; }
+  .total { display: flex; align-items: center; gap: 12px; margin: 10px 0 18px; }
+  .total .bar { flex: 1; height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+  .total .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .total .n { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
+  .phase { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin: 16px 0; overflow: hidden; }
+  .phase .ph { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--surface-2); }
+  .phase .ph img { width: 32px; height: 32px; border-radius: 7px; }
+  .phase .ph h2 { margin: 0; border: 0; padding: 0; font-size: 1.1rem; flex: 1; }
+  .phase .ph .cnt { font-size: .85rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .phase .ph .cnt.all { color: var(--green); font-weight: 800; }
+  .item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border-top: 1px solid var(--line); }
+  .item input { width: 22px; height: 22px; margin: 4px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+  .item label { flex: 1; cursor: pointer; line-height: 1.7; }
+  .item.done label { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line); }
+  .item .ref { display: block; font-size: .78rem; color: var(--accent-ink); text-decoration: none; margin-top: 2px; }
+  .item .ref:hover { text-decoration: underline; }
+  .hide-done .item.done { display: none; }
+  .copied { font-size: .85rem; color: var(--green); font-weight: 700; }
+</style>
+</head>
+<body data-root="./" data-page="checklist">
+<main class="wrap">
+<h1>✅ 開発者のチェックリスト</h1>
+<p class="lead">「難しいことは抜きにして、これだけ見ておけばよい」項目を、設計・実装・リリース前・運用の4つの場面に分けました。各項目は<a href="chapters/02-ten-rules.html">第2章の10のルール</a>を現場の作業に落としたもので、根拠と直し方は各章にリンクしています。チェックはこのブラウザに保存されます。</p>
+
+<div class="box hook">
+  <div class="box-title"><span class="em">🔑</span>使い方</div>
+  <ol style="margin:0">
+    <li>プロジェクト名を入れ、場面ごとに該当する項目を確認してチェックする。わからない項目は「→ 第◯章」で根拠を読む。</li>
+    <li>「Markdown でコピー」して、プルリクエストの説明やチケットに貼る。チームで同じ項目を見る習慣ができる。</li>
+    <li>該当しない項目（例：Cookie を使わない API）は、チェックせず「該当なし」と PR に書けばよい。</li>
+  </ol>
+</div>
+
+<div class="toolbar">
+  <input class="field" id="project" type="text" placeholder="対象（プロジェクト名・機能名）" aria-label="対象のプロジェクト名">
+  <button class="btn small" id="copy" type="button">📋 Markdown でコピー</button>
+  <button class="chip" id="hide" type="button" aria-pressed="false">未チェックだけ表示</button>
+  <button class="btn ghost small" id="reset" type="button">すべて外す</button>
+  <span class="copied" id="copied" aria-live="polite"></span>
+</div>
+<div class="total"><div class="bar"><div id="total-bar"></div></div><div class="n" id="total-n">0 / 0</div></div>
+
+<div id="phases"></div>
+
+<div class="box warn">
+  <div class="box-title"><span class="em">⚠️</span>チェックリストの限界</div>
+  <p style="margin:0">このリストは「よくある穴」を漏れなく見るためのもので、全部チェックが付けば安全という保証ではありません。決済・医療・個人情報を大量に扱うシステムでは、専門家による<span class="term" data-tip="脆弱性診断：専門家が実際に攻撃者の手法でシステムを調べ、穴を報告するサービス。">脆弱性診断</span>も組み合わせてください（<a href="chapters/09-secure-process.html#testing">第9章</a>）。</p>
+</div>
+
+</main>
+<script src="assets/site.js"></script>
+<script>
+(function () {
+  var store = window.SECNOTE_STORE;
+  // 場面 → 項目。ref は根拠を書いた章の節
+  var PHASES = [
+    { id: "design", title: "設計のとき", icon: "ops/notebook-pen.svg", items: [
+      { id: "d1", t: "扱うデータを分類した（個人情報・決済情報・認証情報・社外秘・公開してよいもの）", ref: "05-crypto-secrets.html#pii", label: "第5章 7. 個人情報とデータ最小化" },
+      { id: "d2", t: "認証（ログイン）は自作せず、フレームワーク標準か外部の認証サービスを使う", ref: "04-auth-session.html#password", label: "第4章 2. パスワードの扱い" },
+      { id: "d3", t: "「誰が・何に・何をしてよいか」の権限の表を作った", ref: "04-auth-session.html#authz", label: "第4章 6. 認可の不備" },
+      { id: "d4", t: "外部に公開するもの（URL・ポート・ストレージ・管理画面）を一覧にした", ref: "07-infra-cloud.html#network", label: "第7章 2. ネットワーク" },
+      { id: "d5", t: "「この機能が悪用されたらどうなるか」を1回考えて書き残した（簡易脅威モデリング）", ref: "09-secure-process.html#threat-modeling", label: "第9章 2. 設計：脅威モデリング" },
+      { id: "d6", t: "ログに何を残し、何を残さないか（パスワード・カード番号・トークン）を決めた", ref: "08-operations-incident.html#logging", label: "第8章 2. ログ" }
+    ] },
+    { id: "impl", title: "実装のとき", icon: "asset/code.svg", items: [
+      { id: "i1", t: "入力の検証はサーバー側で行う（型・長さ・範囲・許可リスト）。画面側の検証だけに頼らない", ref: "03-injection-xss.html#validation", label: "第3章 7. 検証の設計" },
+      { id: "i2", t: "SQL は文字列をつなげて作らず、プレースホルダか ORM を使う", ref: "03-injection-xss.html#sql", label: "第3章 2. SQL インジェクション" },
+      { id: "i3", t: "HTML への出力はテンプレートの自動エスケープに任せ、無効化する書き方を使っていない", ref: "03-injection-xss.html#xss", label: "第3章 4. XSS" },
+      { id: "i4", t: "OS コマンドを呼ばない。どうしても呼ぶなら引数を配列で渡し、シェルを経由しない", ref: "03-injection-xss.html#command", label: "第3章 3. OS コマンドインジェクション" },
+      { id: "i5", t: "ファイルパスや接続先 URL に利用者の入力をそのまま使わず、許可リストから選ぶ", ref: "03-injection-xss.html#path", label: "第3章 3. パストラバーサル・SSRF" },
+      { id: "i6", t: "権限の確認は画面だけでなく、API・サーバー側で毎回行う（ID を変えても他人のデータが見えない）", ref: "04-auth-session.html#idor", label: "第4章 6. IDOR" },
+      { id: "i7", t: "パスワードは bcrypt か Argon2 でハッシュして保存する（平文・MD5・SHA-256 単体は不可）", ref: "04-auth-session.html#password", label: "第4章 2. パスワードの保存" },
+      { id: "i8", t: "秘密情報（API キー・DB パスワード）はコードや設定ファイルに書かず、環境変数かシークレット管理に置く", ref: "05-crypto-secrets.html#secrets", label: "第5章 5. 秘密情報の管理" },
+      { id: "i9", t: "利用者に見せるエラーは一般的な文にし、スタックトレースや SQL を画面に出さない", ref: "09-secure-process.html#coding", label: "第9章 3. 実装の約束" },
+      { id: "i10", t: "トークン・ID・パスワードリセット用の値は、暗号用の乱数生成器で作る", ref: "05-crypto-secrets.html#random", label: "第5章 8. 乱数" }
+    ] },
+    { id: "release", title: "リリース前", icon: "ops/rocket.svg", items: [
+      { id: "r1", t: "すべての通信が HTTPS で、HTTP でアクセスされても HTTPS に転送される", ref: "05-crypto-secrets.html#tls", label: "第5章 2. 通信の暗号化" },
+      { id: "r2", t: "Cookie に Secure・HttpOnly・SameSite を付けた", ref: "04-auth-session.html#cookie", label: "第4章 4. Cookie の属性" },
+      { id: "r3", t: "セキュリティヘッダー（CSP・HSTS・X-Content-Type-Options・frame-ancestors）を設定した", ref: "07-infra-cloud.html#headers", label: "第7章 5. セキュリティヘッダー" },
+      { id: "r4", t: "依存ライブラリのスキャンで、重大（High 以上）の脆弱性が残っていない", ref: "06-dependencies.html#scan", label: "第6章 4. スキャン" },
+      { id: "r5", t: "デバッグ機能・初期パスワード・サンプルページ・不要な管理画面を無効化した", ref: "07-infra-cloud.html#misconfig", label: "第7章 1. 設定ミス" },
+      { id: "r6", t: "DB・キャッシュ・内部 API がインターネットから直接見えない", ref: "07-infra-cloud.html#network", label: "第7章 2. ネットワーク" },
+      { id: "r7", t: "ログイン・パスワードリセット・公開 API に回数制限（レート制限）をかけた", ref: "04-auth-session.html#bruteforce", label: "第4章 3. 総当たり対策" },
+      { id: "r8", t: "CSRF 対策（トークンか SameSite）が、状態を変える全操作で有効", ref: "04-auth-session.html#csrf", label: "第4章 5. CSRF" },
+      { id: "r9", t: "バックアップが取れていて、実際に戻せることを一度確かめた", ref: "08-operations-incident.html#backup", label: "第8章 4. バックアップ" }
+    ] },
+    { id: "ops", title: "運用のとき", icon: "ops/activity.svg", items: [
+      { id: "o1", t: "依存ライブラリの自動更新（Dependabot か Renovate）が動いていて、PR を放置していない", ref: "06-dependencies.html#update", label: "第6章 5. 自動更新" },
+      { id: "o2", t: "使っている部品の脆弱性情報を受け取る仕組みがある（GitHub Security Advisories・JVN など）", ref: "08-operations-incident.html#vuln-response", label: "第8章 6. 脆弱性情報の追い方" },
+      { id: "o3", t: "ログイン失敗の急増・権限の変更・外向きの異常な通信に、通知（アラート）がある", ref: "08-operations-incident.html#monitoring", label: "第8章 3. 監視とアラート" },
+      { id: "o4", t: "退職者・不要なアカウント・古い API キーを定期的に棚卸しして消している", ref: "08-operations-incident.html#housekeeping", label: "第8章 8. 権限の棚卸し" },
+      { id: "o5", t: "事故が起きたときの連絡先と最初の手順が書いてあり、全員がその場所を知っている", ref: "08-operations-incident.html#incident", label: "第8章 5. インシデント対応" },
+      { id: "o6", t: "サポートが終了（EoL）した言語・フレームワーク・OS・DB を使っていない", ref: "06-dependencies.html#choose", label: "第6章 6. 部品の選び方" },
+      { id: "o7", t: "年に1回、このチェックリストと権限・公開範囲を見直している", ref: "09-secure-process.html#team", label: "第9章 8. チームへの広げ方" }
+    ] }
+  ];
+
+  var state = store.load("checklist", { project: "", checked: {} });
+  var hideDone = false;
+  var root = document.getElementById("phases");
+  var projectEl = document.getElementById("project");
+  projectEl.value = state.project || "";
+  projectEl.addEventListener("input", function () { state.project = projectEl.value; store.save("checklist", state); });
+  function esc(s) { return String(s || "").replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function render() {
+    var total = 0, done = 0;
+    root.innerHTML = PHASES.map(function (p) {
+      var pd = p.items.filter(function (it) { return state.checked[it.id]; }).length;
+      total += p.items.length; done += pd;
+      return '<section class="phase" id="' + p.id + '">' +
+        '<div class="ph"><img src="assets/icons/' + p.icon + '" alt=""><h2>' + p.title + '</h2><span class="cnt' + (pd === p.items.length ? " all" : "") + '">' + pd + " / " + p.items.length + "</span></div>" +
+        p.items.map(function (it) {
+          var on = !!state.checked[it.id];
+          return '<div class="item' + (on ? " done" : "") + '"><input type="checkbox" id="' + it.id + '" data-id="' + it.id + '"' + (on ? " checked" : "") + '>' +
+            '<label for="' + it.id + '">' + esc(it.t) + '<a class="ref" href="chapters/' + it.ref + '">→ ' + esc(it.label) + "</a></label></div>";
+        }).join("") + "</section>";
+    }).join("");
+    document.getElementById("total-bar").style.width = total ? (done / total * 100) + "%" : "0";
+    document.getElementById("total-n").textContent = done + " / " + total;
+    root.className = hideDone ? "hide-done" : "";
+  }
+  root.addEventListener("change", function (e) {
+    var cb = e.target; if (!cb.matches || !cb.matches("input[type=checkbox]")) return;
+    var id = cb.getAttribute("data-id");
+    if (cb.checked) state.checked[id] = Date.now(); else delete state.checked[id];
+    store.save("checklist", state);
+    render();
+  });
+  document.getElementById("hide").addEventListener("click", function () {
+    hideDone = !hideDone; this.setAttribute("aria-pressed", hideDone ? "true" : "false"); render();
+  });
+  document.getElementById("reset").addEventListener("click", function () {
+    if (!confirm("すべてのチェックを外しますか？")) return;
+    state.checked = {}; store.save("checklist", state); render();
+  });
+
+  function toMarkdown() {
+    var lines = ["## セキュリティチェック" + (state.project ? "：" + state.project : ""), ""];
+    PHASES.forEach(function (p) {
+      lines.push("### " + p.title);
+      p.items.forEach(function (it) { lines.push("- [" + (state.checked[it.id] ? "x" : " ") + "] " + it.t); });
+      lines.push("");
+    });
+    lines.push("<!-- 開発者のためのセキュリティ入門 チェックリスト -->");
+    return lines.join("\n");
+  }
+  document.getElementById("copy").addEventListener("click", function () {
+    var md = toMarkdown(), msg = document.getElementById("copied");
+    function ok() { msg.textContent = "コピーしました"; setTimeout(function () { msg.textContent = ""; }, 2500); }
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = md; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); ok(); } catch (e) { msg.textContent = "コピーできませんでした"; }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md).then(ok, fallback); else fallback();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

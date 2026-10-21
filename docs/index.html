@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発者のためのセキュリティ入門</title>
+<meta name="description" content="セキュリティの用語がわからない開発者のための学習ノート。守るもの・よくある穴・まずこれだけ守る10のルール・学ぶ順番を、図と想起練習でまとめています。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-root="./" data-page="home">
+<main class="wrap wide">
+
+<section class="hero">
+  <h1>開発者のためのセキュリティ入門</h1>
+  <p>「脆弱性のニュースは見るけれど、用語がわからない。システムを作るとき何に気をつければいいのかもわからない」という開発者のための資料です。<br>
+  守るもの・よくある穴・まずこれだけ守る10のルール・学ぶ順番を、専門用語に定義を添え、図と想起練習でまとめています。難しい理屈より「見たら気づける」「明日から手が動く」ことを目標にしています。</p>
+  <a class="btn" href="chapters/study-method.html">学び方を読む →</a>
+  <a class="btn ghost" style="color:#fff;border-color:rgba(255,255,255,.4)" href="checklist.html">チェックリストを開く</a>
+</section>
+
+<div class="box hook" id="due-today">読み込み中</div>
+
+<h2>章の一覧</h2>
+<p>上から順に進めることを想定しています。急ぐ場合は <b>第1章 → 第2章 → チェックリスト</b> の3つだけで「最低限」がそろいます。各章末の「学習記録」に記録すると、<b>次回の復習日</b>がここに表示されます（1日後 → 3日後 → 7日後 → 14日後 → 30日後）。</p>
+<div class="grid" id="chapter-list"></div>
+
+<h2>道具</h2>
+<div class="grid">
+  <a class="card" href="checklist.html">
+    <div class="icons"><img src="assets/icons/defense/list-checks.svg" alt=""><img src="assets/icons/ops/clipboard-check.svg" alt=""></div>
+    <h3>✅ 開発者のチェックリスト</h3>
+    <p>設計・実装・リリース前・運用の4場面で「これだけは確認する」項目。チェックはブラウザに保存され、<b>Markdown でコピー</b>して PR の説明に貼れます。</p>
+  </a>
+  <a class="card" href="glossary.html">
+    <div class="icons"><img src="assets/icons/ops/book-open.svg" alt=""><img src="assets/icons/ops/search.svg" alt=""></div>
+    <h3>📖 用語集</h3>
+    <p>全章の専門用語とその定義。ニュースや会議で出てきた言葉を、日本語・英語のどちらでも検索できます。</p>
+  </a>
+  <a class="card" href="cards.html">
+    <div class="icons"><img src="assets/icons/ops/brain.svg" alt=""><img src="assets/icons/ops/repeat.svg" alt=""></div>
+    <h3>🃏 復習カード</h3>
+    <p>設問に対して答えを<b>思い出してから</b>確認します。正答したカードほど出題間隔が広がります。</p>
+  </a>
+</div>
+
+<h2>本サイトの方針</h2>
+<div class="grid">
+  <div class="card"><h3>① 開発者の守備範囲に絞る</h3><p>セキュリティ全体は広大ですが、開発者が日々触るのは<b>コード・部品・設定・運用</b>の4つです。暗号理論や攻撃ツールの使い方には深入りしません。</p></div>
+  <div class="card"><h3>② 「何が起きる → なぜ → どう防ぐ → どう確かめる」の順</h3><p>攻撃名の暗記ではなく、事故の形と原理から入り、危険なコードと安全なコードを並べて見せます。</p></div>
+  <div class="card"><h3>③ 読み返すより思い出す</h3><p>章末の想起練習は本文を見ずに答えます。復習日はサイトが自動で計算します（間隔反復）。</p></div>
+</div>
+
+<div class="box law">
+  <div class="box-title"><span class="em">⚖️</span>練習は、自分のものか許可された環境だけで</div>
+  <p style="margin:0">本サイトで学ぶ攻撃の仕組みを、<b>自分の管理下にないシステムに対して試すこと</b>は、不正アクセス禁止法などに触れる犯罪です。「調べるだけ」「診断のつもり」でも許されません。練習は自分で立てた環境や、練習用に公開されている教材（<a href="chapters/study-method.html#materials">学び方</a>で紹介）で行ってください。</p>
+</div>
+
+</main>
+<script src="assets/site.js"></script>
+</body>
+</html>
