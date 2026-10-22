@@ -1,7 +1,8 @@
 # security-for-developers
 
 「脆弱性のニュースは見るけれど、用語がわからない。システムを作るとき何に気をつければいいのかもわからない」という開発者のための学習サイト「**開発者のためのセキュリティ入門**」です。
-[aws-get-certified](https://github.com/ht-0328/aws-get-certified)（AWS 合格ノート）と同じ作りで、GitHub Pages で公開し、PC・スマートフォンのブラウザで閲覧できます。
+
+サイト：[https://ht-0328.github.io/security-for-developers/](https://ht-0328.github.io/security-for-developers/)
 
 ## 何が学べるか
 
@@ -13,10 +14,10 @@
 ## 特徴
 
 - **専門用語には定義を併記**：点線の付いた用語はタップで定義を表示します。各章の「用語の補足」と、全章を横断して検索できる「用語集」も用意しています。
-- **分類ごとに色分けしたアイコン**：攻撃＝赤、守り＝緑、データ・部品＝青、人・権限＝紫、運用＝橙。AWS 公式アイコンと同じ「色付きチップ」の見た目で、色を記憶の手がかりにしています。
+- **分類ごとに色分けしたアイコン**：攻撃＝赤、守り＝緑、データ・部品＝青、人・権限＝紫、運用＝橙。色付きチップの見た目で、色を記憶の手がかりにしています。
 - **危険な例と安全な例の対比**：各脆弱性を「何が起きる → なぜ → どう防ぐ → どう確かめる」の順で説明し、コードを NG／OK で並べます。
 - **体験コーナー**：CVSS の区分、HTML エスケープ、Cookie 属性、SHA-256、脅威モデリングのワークシートなど、ブラウザだけで試せる小さな道具を各章に置いています。
-- **記憶研究に基づく構成**（AWS 合格ノートと同じ）
+- **記憶研究に基づく構成**
   - 🧭 各章の冒頭で「理解してほしいこと」と構成を提示
   - 🧠 読み返しではなく想起練習（章末の設問、復習カード）
   - 📅 1日 → 3日 → 7日 → 14日 → 30日 の間隔反復。復習日はサイトが自動で計算します
@@ -59,7 +60,7 @@ docs/
 1. **最初の1回だけ**：GitHub のリポジトリ画面で **Settings → Pages** を開き、**Build and deployment** の Source を「**GitHub Actions**」にする
 2. `main` にマージする
 3. あとは `main` の `docs/` が変わるたびに自動で公開されます（**Actions** タブの「Deploy to GitHub Pages」から手動実行も可能）
-4. 公開先：`https://ht-0328.github.io/security-for-developers/`
+4. 公開先：[https://ht-0328.github.io/security-for-developers/](https://ht-0328.github.io/security-for-developers/)
 
 ローカルで見るときは `docs/index.html` をブラウザで開くだけで OK です。
 
@@ -81,10 +82,3 @@ curl -sL https://registry.npmjs.org/simple-icons/latest | python -c "import json
 # 2. 生成する（出力先 docs/assets/icons）
 python -I tools/make_icons.py lucide/package/icons si/package docs/assets/icons
 ```
-
-## クレジット
-
-- アイコン：[Lucide](https://lucide.dev/)（ISC License）、ブランドロゴ：[Simple Icons](https://simpleicons.org/)（CC0 1.0）。ライセンス文は `docs/assets/icons/` に同梱しています。各ロゴはそれぞれの権利者の商標です。
-- 内容の根拠：IPA「安全なウェブサイトの作り方」「情報セキュリティ10大脅威」、OWASP Top 10:2025・Cheat Sheet Series、MDN Web Docs、NIST SP 800-63B など、各章の「出典」に記載しています。
-- 学習方法：認知心理学の学習研究（間隔反復・分散学習、テスト効果、二重符号化など）に基づいて構成しています。
-- 内容は個人の学習用資料です。対策の最新情報は IPA・OWASP・各ライブラリの公式情報で確認してください。本サイトで学んだ手法を、自分の管理下にないシステムに対して試すことは法律に触れます。
